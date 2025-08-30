@@ -37,12 +37,13 @@ class MainWindow(QWidget):
     start_video_processing_signal = pyqtSignal(str, bool, bool, bool, bool, bool, str, str, bool, str)
     start_webcam_processing_signal = pyqtSignal(bool, bool, bool, bool, bool, str, str, bool, str)
     start_phone_processing_signal = pyqtSignal(str, bool, bool, bool, bool, bool, str, str, bool, str)
-    # 3D fixed signals
+    # 3D signals
     start_3d_video_processing_signal = pyqtSignal(str, int, int, bool, bool, bool, str, bool, str, bool, str, bool, int)
     start_3d_webcam_processing_signal = pyqtSignal(int, int, bool, bool, bool, str, bool, str, bool, str, bool, int)
     start_3d_phone_processing_signal = pyqtSignal(str, int, int, bool, bool, bool, str, bool, str, bool, str, bool, int)
     stop_worker_signal = pyqtSignal() 
-
+    switch_the_model_signal = pyqtSignal(int)
+    
     def __init__(self):
         # --- Initialize the superclass ---
         super().__init__()
@@ -53,17 +54,17 @@ class MainWindow(QWidget):
         
         self.initUI()
         self.setup_worker_thread() # New method to set up the thread
-        # self.set_light_mode() # Set default theme
         self.apply_theme('light')  # Apply modern theme
 
     def initUI(self):
-        self.setWindowTitle('3D Human Motion Capture System')
+        self.setWindowTitle('2D and 3D Human Motion Capture System')
         self.setWindowIcon(QIcon('resources/icons/main_window_icon.png'))
 
         # --- Create Menu Bar ---
         self.menu_bar = QMenuBar(self)
         
         # --- Settings Menu ---
+        # Theme settings
         settings_menu = self.menu_bar.addMenu('Settings')
         theme_menu = settings_menu.addMenu('Theme')
         light_mode_action = QAction('Light Mode', self)
@@ -72,6 +73,15 @@ class MainWindow(QWidget):
         dark_mode_action = QAction('Dark Mode', self)
         dark_mode_action.triggered.connect(self.set_dark_mode)
         theme_menu.addAction(dark_mode_action)
+        
+        # Model settings
+        model_menu = settings_menu.addMenu('Select Model')
+        light_model_action = QAction('Light Model', self)
+        light_model_action.triggered.connect(self.set_light_model)
+        model_menu.addAction(light_model_action)
+        heavy_model_action = QAction('Heavy Model', self)
+        heavy_model_action.triggered.connect(self.set_heavy_model)
+        model_menu.addAction(heavy_model_action)
 
         # --- Help Menu ---
         help_menu = self.menu_bar.addMenu('Help')
@@ -85,11 +95,9 @@ class MainWindow(QWidget):
         # --- Create the start and end buttons ---
         self.start_button = QPushButton('Start')
         self.start_button.setMinimumWidth(200)
-        # self.set_style_for_widgets(self.start_button, 14, "black", "rgb(47, 247, 54)", "Start the processing for each source")
         
         self.end_button = QPushButton('End')
         self.end_button.setMinimumWidth(200)
-        # self.set_style_for_widgets(self.end_button, 14, "black", "rgb(243, 38, 24)", "End the processing for each source")
         
         # --- label to display the media ---
         self.displayed_media_label = QLabel('Your selected media will be displayed here.')
@@ -106,279 +114,173 @@ class MainWindow(QWidget):
         # --- primary dropdown for selecting the type of processing ---
         self.dropdown = QComboBox()
         self.dropdown.addItems(['Select Type...', '2D', '3D'])
-        # self.set_style_for_widgets(self.dropdown, 12, "black", "rgb(227, 249, 164)")
         
         
         # --- secondary 2D dropdown for selecting the source of the media ---
         self.dropdown_2d = QComboBox()
         self.dropdown_2d.addItems(['Select Source...', 'Upload Image', 'Upload Video', 'Use Webcam', 'Use Smartphone Camera'])
-        # self.set_style_for_widgets(self.dropdown_2d, 12, "black", "rgb(129, 249, 221)")
         self.dropdown_2d.hide()
 
         # --- secondary 3D dropdown for selecting the source of the media ---
         self.dropdown_3d = QComboBox()
         self.dropdown_3d.addItems(['Select Source...', 'Upload Video', 'Use Webcam', 'Use Smartphone Camera'])
-        # self.set_style_for_widgets(self.dropdown_3d, 12, "black", "rgb(249, 129, 129)")
         self.dropdown_3d.hide()
 
-        #! name convention is : (type of processing)_(variable name)_(UI name)
-        #region UI elements for video processing 
+        #! name convention is : (type ofsource)_(type of processing)_(variable name)_(UI name)
+        #region UI elements for 2D video processing 
         # buttons
         self.vid_browse_button = QPushButton('Browse for Video...')
-        # self.set_style_for_widgets(self.vid_browse_button, 12, "black", "rgb(187, 246, 136)", "Browse for a video file")
         # checkboxes
         self.vid_plot_values_cb = QCheckBox("Plot Values on Video")
-        # self.set_style_for_widgets(self.vid_plot_values_cb, 10, "black", "rgb(58, 197, 130)")
         self.vid_plot_landmarks_cb = QCheckBox("Plot Landmarks on Video")
-        # self.set_style_for_widgets(self.vid_plot_landmarks_cb, 10, "black", "rgb(58, 197, 130)")
         self.vid_plot_skeleton_cb = QCheckBox("Plot Skeleton on Video")
-        # self.set_style_for_widgets(self.vid_plot_skeleton_cb, 10, "black", "rgb(58, 197, 130)")
         self.vid_save_landmarks_cb = QCheckBox("Save Video Keypoints to File")
-        # self.set_style_for_widgets(self.vid_save_landmarks_cb, 10, "black", "rgb(58, 197, 130)")
         self.vid_save_processed_video_cb = QCheckBox("Save Processed Video")
-        # self.set_style_for_widgets(self.vid_save_processed_video_cb, 10, "black", "rgb(58, 197, 130)")
         self.vid_save_processed_video_black_background_cb = QCheckBox("Save Processed Video with Black Background")
-        # self.set_style_for_widgets(self.vid_save_processed_video_black_background_cb, 10, "black", "rgb(58, 197, 130)")
         # labels
         self.vid_landmarks_filename_label = QLabel("Keypoints Filename:")
-        # self.vid_landmarks_filename_label.setFont(QFont("Arial", 12))
         self.vid_output_video_filename_label = QLabel("Processed Video Filename:")
-        # self.vid_output_video_filename_label.setFont(QFont("Arial", 12))
         self.vid_output_video_black_background_filename_label = QLabel("Processed Video with Black Background:")
-        # self.vid_output_video_black_background_filename_label.setFont(QFont("Arial", 12))
         # inputs
         self.vid_landmarks_filename_input = QLineEdit("video_keypoints.json")
         self.vid_output_video_filename_input = QLineEdit("processed_video.mp4")
         self.vid_output_video_black_background_filename_input = QLineEdit("processed_video_black_background.mp4")
-        # self.set_style_for_widgets(self.vid_landmarks_filename_input, 10, "black", "rgb(134, 228, 195)", "Enter the filename for the keypoints", Qt.CursorShape.IBeamCursor)
-        # self.set_style_for_widgets(self.vid_output_video_filename_input, 10, "black", "rgb(134, 228, 195)", "Enter the filename for the processed video", Qt.CursorShape.IBeamCursor)
-        # self.set_style_for_widgets(self.vid_output_video_black_background_filename_input, 10, "black", "rgb(134, 228, 195)", "Enter the filename for the processed video with black background", Qt.CursorShape.IBeamCursor)
         #endregion
         
-        #region UI elements for image processing 
+        #region UI elements for 2D image processing 
         # buttons
         self.img_browse_button = QPushButton('Browse for Image...')
-        # self.set_style_for_widgets(self.img_browse_button, 12, "black", "rgb(187, 246, 136)", "Browse for an image file")
         # checkboxes
         self.img_plot_landmarks_cb = QCheckBox("Plot Landmarks")
-        # self.set_style_for_widgets(self.img_plot_landmarks_cb, 10, "black", "rgb(121, 154, 226)")
         self.img_plot_skeleton_cb = QCheckBox("Plot Skeleton")
-        # self.set_style_for_widgets(self.img_plot_skeleton_cb, 10, "black", "rgb(121, 154, 226)")
         self.img_save_landmarks_cb = QCheckBox("Save Landmarks to File")
-        # self.set_style_for_widgets(self.img_save_landmarks_cb, 10, "black", "rgb(121, 154, 226)")
         self.img_save_processed_image_cb = QCheckBox("Save Processed Image")
-        # self.set_style_for_widgets(self.img_save_processed_image_cb, 10, "black", "rgb(121, 154, 226)")
         self.img_save_processed_image_black_background_cb = QCheckBox("Save Processed Image with Black Background")
-        # self.set_style_for_widgets(self.img_save_processed_image_black_background_cb, 10, "black", "rgb(121, 154, 226)")
         # labels
         self.img_landmarks_filename_label = QLabel("Keypoints Filename:")
-        # self.img_landmarks_filename_label.setFont(QFont("Arial", 12))
         self.img_processed_image_filename_label = QLabel("Processed Image Filename:")
-        # self.img_processed_image_filename_label.setFont(QFont("Arial", 12))
         self.img_processed_image_size_label = QLabel("Output Size:")
-        # self.img_processed_image_size_label.setFont(QFont("Arial", 12))
         self.img_processed_image_black_background_filename_label = QLabel("Processed Image with Black Background:")
-        # self.img_processed_image_black_background_filename_label.setFont(QFont("Arial", 12))
         # inputs
         self.img_landmarks_filename_input = QLineEdit("image_landmarks.json")
         self.img_processed_image_filename_input = QLineEdit("processed_image.png")
         self.img_processed_image_black_background_filename_input = QLineEdit("processed_image_black_background.png")
-        # self.set_style_for_widgets(self.img_landmarks_filename_input, 10, "black", "rgb(134, 228, 195)", "Enter the filename for the keypoints", Qt.CursorShape.IBeamCursor)
-        # self.set_style_for_widgets(self.img_processed_image_filename_input, 10, "black", "rgb(134, 228, 195)", "Enter the filename for the processed image", Qt.CursorShape.IBeamCursor)
-        # self.set_style_for_widgets(self.img_processed_image_black_background_filename_input, 10, "black", "rgb(134, 228, 195)", "Enter the filename for the processed image with black background", Qt.CursorShape.IBeamCursor)
         # dropdowns
         self.img_processed_image_size_combo = QComboBox()
         self.img_processed_image_size_combo.addItems(["Original", "1920x1080", "1280x720", "640x480"])
-        # self.set_style_for_widgets(self.img_processed_image_size_combo, 10, "black", "rgb(189, 216, 207)", "Select the output size for the processed image", Qt.CursorShape.PointingHandCursor)
         #endregion
 
-        #region UI elements for webcam processing 
+        #region UI elements for 2D webcam processing 
         # checkboxes
         self.cam_plot_values_cb = QCheckBox("Plot Values on Webcam Video")
-        # self.set_style_for_widgets(self.cam_plot_values_cb, 10, "black", "rgb(233, 217, 115)")
         self.cam_plot_landmarks_cb = QCheckBox("Plot Landmarks on Webcam Video")
-        # self.set_style_for_widgets(self.cam_plot_landmarks_cb, 10, "black", "rgb(233, 217, 115)")
         self.cam_plot_skeleton_cb = QCheckBox("Plot Skeleton on Webcam Video")
-        # self.set_style_for_widgets(self.cam_plot_skeleton_cb, 10, "black", "rgb(233, 217, 115)")
         self.cam_save_landmarks_cb = QCheckBox("Save Webcam Keypoints to File")
-        # self.set_style_for_widgets(self.cam_save_landmarks_cb, 10, "black", "rgb(233, 217, 115)")
         self.cam_save_processed_video_cb = QCheckBox("Save Processed Webcam Video")
-        # self.set_style_for_widgets(self.cam_save_processed_video_cb, 10, "black", "rgb(233, 217, 115)")
         self.cam_save_processed_video_black_background_cb = QCheckBox("Save Processed Webcam Video with Black Background")
-        # self.set_style_for_widgets(self.cam_save_processed_video_black_background_cb, 10, "black", "rgb(233, 217, 115)")
         # labels
         self.cam_landmarks_filename_label = QLabel("Keypoints Filename:")
-        # self.cam_landmarks_filename_label.setFont(QFont("Arial", 12))
         self.cam_output_video_filename_label = QLabel("Processed Video Filename:")
-        # self.cam_output_video_filename_label.setFont(QFont("Arial", 12))
         self.cam_output_video_black_background_filename_label = QLabel("Processed Video with Black Background:")
-        # self.cam_output_video_black_background_filename_label.setFont(QFont("Arial", 12))
         # inputs
         self.cam_landmarks_filename_input = QLineEdit("webcam_keypoints.json")
-        # self.set_style_for_widgets(self.cam_landmarks_filename_input, 10, "black", "rgb(134, 228, 195)", "Enter the filename for the keypoints", Qt.CursorShape.IBeamCursor)
         self.cam_output_video_filename_input = QLineEdit("webcam_video.mp4")
-        # self.set_style_for_widgets(self.cam_output_video_filename_input, 10, "black", "rgb(134, 228, 195)", "Enter the filename for the processed video", Qt.CursorShape.IBeamCursor)
         self.cam_output_video_black_background_filename_input = QLineEdit("webcam_video_black_background.mp4")
-        # self.set_style_for_widgets(self.cam_output_video_black_background_filename_input, 10, "black", "rgb(134, 228, 195)", "Enter the filename for the processed video with black background", Qt.CursorShape.IBeamCursor)
         #endregion
 
-        #region UI elements for phone camera processing 
+        #region UI elements for 2D phone camera processing 
         # labels
         self.phone_ip_label = QLabel("Phone IP Address:")
         self.phone_landmarks_filename_label = QLabel("Keypoints Filename:")
-        # self.phone_landmarks_filename_label.setFont(QFont("Arial", 12))
         self.phone_output_video_filename_label = QLabel("Processed Video Filename:")
-        # self.phone_output_video_filename_label.setFont(QFont("Arial", 12))
         self.phone_output_video_black_background_filename_label = QLabel("Processed Video with Black Background:")
-        # self.phone_output_video_black_background_filename_label.setFont(QFont("Arial", 12))
         # inputs
         self.phone_ip_input = QLineEdit("192.168.1.107") # Default, user should change
         self.phone_landmarks_filename_input = QLineEdit("phone_keypoints.json")
         self.phone_output_video_filename_input = QLineEdit("phone_video.mp4")
         self.phone_output_video_black_background_filename_input = QLineEdit("phone_video_black_background.mp4")
-        # self.set_style_for_widgets(self.phone_ip_input, 10, "black", "rgb(134, 228, 195)", "Enter your phone's IP address", Qt.CursorShape.IBeamCursor)
-        # self.set_style_for_widgets(self.phone_landmarks_filename_input, 10, "black", "rgb(134, 228, 195)", "Enter the filename for the keypoints", Qt.CursorShape.IBeamCursor)
-        # self.set_style_for_widgets(self.phone_output_video_filename_input, 10, "black", "rgb(134, 228, 195)", "Enter the filename for the processed video", Qt.CursorShape.IBeamCursor)
-        # self.set_style_for_widgets(self.phone_output_video_black_background_filename_input, 10, "black", "rgb(134, 228, 195)", "Enter the filename for the processed video with black background", Qt.CursorShape.IBeamCursor)
         # checkboxes
         self.phone_plot_values_cb = QCheckBox("Plot Values on Phone Video")
-        # self.set_style_for_widgets(self.phone_plot_values_cb, 10, "black", "rgb(228, 134, 134)")
         self.phone_plot_landmarks_cb = QCheckBox("Plot Landmarks on Phone Video")
-        # self.set_style_for_widgets(self.phone_plot_landmarks_cb, 10, "black", "rgb(228, 134, 134)")
         self.phone_plot_skeleton_cb = QCheckBox("Plot Skeleton on Phone Video")
-        # self.set_style_for_widgets(self.phone_plot_skeleton_cb, 10, "black", "rgb(228, 134, 134)")
         self.phone_save_landmarks_cb = QCheckBox("Save Phone Keypoints to File")
-        # self.set_style_for_widgets(self.phone_save_landmarks_cb, 10, "black", "rgb(228, 134, 134)")
         self.phone_save_processed_video_cb = QCheckBox("Save Processed Phone Video")
-        # self.set_style_for_widgets(self.phone_save_processed_video_cb, 10, "black", "rgb(228, 134, 134)")
         self.phone_save_processed_video_black_background_cb = QCheckBox("Save Processed Phone Video with Black Background")
-        # self.set_style_for_widgets(self.phone_save_processed_video_black_background_cb, 10, "black", "rgb(228, 134, 134)")
         #endregion
         
         #region UI elements for 3D video processing
         # buttons
         self.vid_3d_browse_button = QPushButton('Browse for Video...')
-        # self.set_style_for_widgets(self.fixed_3d_vid_browse_button, 12, "black", "rgb(246, 136, 136)", tooltip="Browse for a video file for 3D Fixed processing")
         # labels
         self.vid_3d_scaling_time_label = QLabel("Scaling Duration (s):")
-        # self.fixed_3d_vid_scaling_time_label.setFont(QFont("Arial", 12))
         self.vid_3d_keypoints_filename_label = QLabel("Keypoints Filename:")
-        # self.fixed_3d_vid_keypoints_filename_label.setFont(QFont("Arial", 12))
         self.vid_3d_output_video_filename_label = QLabel("Processed Video Filename:")
-        # self.fixed_3d_vid_output_video_filename_label.setFont(QFont("Arial", 12))
         self.vid_3d_output_video_black_background_filename_label = QLabel("Processed Video with Black Background Filename:")
-        # self.fixed_3d_vid_output_video_black_background_filename_label.setFont(QFont("Arial", 12))
         self.vid_3d_port_label = QLabel("Port:")
-        # self.fixed_3d_vid_port_label.setFont(QFont("Arial", 12))
         # inputs
         self.vid_3d_scaling_time_input = QLineEdit("5")
-        # self.set_style_for_widgets(self.fixed_3d_vid_scaling_time_input, 10, "black", "rgb(228, 195, 134)", "Enter the time in seconds for T-Pose calibration", Qt.CursorShape.IBeamCursor)
         self.vid_3d_keypoints_filename_input = QLineEdit("keypoints_3d.json")
-        # self.set_style_for_widgets(self.fixed_3d_vid_keypoints_filename_input, 10, "black", "rgb(228, 195, 134)", "Enter the filename for the 3D keypoints", Qt.CursorShape.IBeamCursor)
         self.vid_3d_output_video_filename_input = QLineEdit("processed_video_3d.mp4")
-        # self.set_style_for_widgets(self.fixed_3d_vid_output_video_filename_input, 10, "black", "rgb(228, 195, 134)", "Enter the filename for the processed 3D video", Qt.CursorShape.IBeamCursor)
         self.vid_3d_output_video_black_background_filename_input = QLineEdit("processed_video_3d_black.mp4")
-        # self.set_style_for_widgets(self.fixed_3d_vid_output_video_black_background_filename_input, 10, "black", "rgb(228, 195, 134)", "Enter the filename for the processed 3D video with a black background", Qt.CursorShape.IBeamCursor)
         self.vid_3d_port_input = QLineEdit("8000")
-        # self.set_style_for_widgets(self.fixed_3d_vid_port_input, 10, "black", "rgb(228, 195, 134)", "Enter the port for sending keypoints", Qt.CursorShape.IBeamCursor)
         # checkboxes
         self.vid_3d_plot_landmarks_cb = QCheckBox("Plot Landmarks and Skeleton")
-        # self.set_style_for_widgets(self.fixed_3d_vid_plot_landmarks_cb, 10, "black")
         self.vid_3d_plot_values_cb = QCheckBox("Plot Values")
-        # self.set_style_for_widgets(self.fixed_3d_vid_plot_values_cb, 10, "black")
         self.vid_3d_save_keypoints_cb = QCheckBox("Save Keypoints as JSON")
-        # self.set_style_for_widgets(self.fixed_3d_vid_save_keypoints_cb, 10, "black")
         self.vid_3d_save_video_cb = QCheckBox("Save Video")
-        # self.set_style_for_widgets(self.fixed_3d_vid_save_video_cb, 10, "black")
         self.vid_3d_save_video_black_background_cb = QCheckBox("Save Video with Black Background")
-        # self.set_style_for_widgets(self.fixed_3d_vid_save_video_black_background_cb, 10, "black")   
         self.vid_3d_send_keypoints_cb = QCheckBox("Send Keypoints over Network")
-        # self.set_style_for_widgets(self.fixed_3d_vid_send_keypoints_cb, 10, "black")
         #endregion
 
         #region UI elements for 3D webcam processing
         # labels
         self.cam_3d_scaling_time_label = QLabel("Scaling Duration (s):")
-        # self.cam_3d_scaling_time_label.setFont(QFont("Arial", 12))
         self.cam_3d_keypoints_filename_label = QLabel("Keypoints Filename:")
-        # self.cam_3d_keypoints_filename_label.setFont(QFont("Arial", 12))
         self.cam_3d_output_video_filename_label = QLabel("Processed Video Filename:")
-        # self.cam_3d_output_video_filename_label.setFont(QFont("Arial", 12))
         self.cam_3d_output_video_black_background_filename_label = QLabel("Processed Video with Black Background Filename:")
-        # self.cam_3d_output_video_black_background_filename_label.setFont(QFont("Arial", 12))
         self.cam_3d_port_label = QLabel("Port:")
-        # self.cam_3d_port_label.setFont(QFont("Arial", 12))
         # inputs
         self.cam_3d_scaling_time_input = QLineEdit("5")
-        # self.set_style_for_widgets(self.cam_3d_scaling_time_input, 10, "black", "rgb(228, 195, 134)", "Enter the time in seconds for T-Pose calibration", Qt.CursorShape.IBeamCursor)
         self.cam_3d_keypoints_filename_input = QLineEdit("keypoints_3d_webcam.json")
-        # self.set_style_for_widgets(self.cam_3d_keypoints_filename_input, 10, "black", "rgb(228, 195, 134)", "Enter the filename for the 3D keypoints from webcam", Qt.CursorShape.IBeamCursor)
         self.cam_3d_output_video_filename_input = QLineEdit("processed_video_3d_webcam.mp4")
-        # self.set_style_for_widgets(self.cam_3d_output_video_filename_input, 10, "black", "rgb(228, 195, 134)", "Enter the filename for the processed 3D webcam video", Qt.CursorShape.IBeamCursor)
         self.cam_3d_output_video_black_background_filename_input = QLineEdit("processed_video_3d_webcam_black.mp4")
-        # self.set_style_for_widgets(self.cam_3d_output_video_black_background_filename_input, 10, "black", "rgb(228, 195, 134)", "Enter the filename for the processed 3D webcam video with a black background", Qt.CursorShape.IBeamCursor)
         self.cam_3d_port_input = QLineEdit("8000")
-        # self.set_style_for_widgets(self.cam_3d_port_input, 10, "black", "rgb(228, 195, 134)", "Enter the port for sending keypoints", Qt.CursorShape.IBeamCursor)
         # checkboxes
         self.cam_3d_plot_landmarks_cb = QCheckBox("Plot Landmarks and Skeleton")
-        # self.set_style_for_widgets(self.cam_3d_plot_landmarks_cb, 10, "black")
         self.cam_3d_plot_values_cb = QCheckBox("Plot Values")
-        # self.set_style_for_widgets(self.cam_3d_plot_values_cb, 10, "black")
         self.cam_3d_save_keypoints_cb = QCheckBox("Save Keypoints as JSON")
-        # self.set_style_for_widgets(self.cam_3d_save_keypoints_cb, 10, "black")
         self.cam_3d_save_video_cb = QCheckBox("Save Video")
-        # self.set_style_for_widgets(self.cam_3d_save_video_cb, 10, "black")
         self.cam_3d_save_video_black_background_cb = QCheckBox("Save Video with Black Background")
-        # self.set_style_for_widgets(self.cam_3d_save_video_black_background_cb, 10, "black")
         self.cam_3d_send_keypoints_cb = QCheckBox("Send Keypoints over Network")
-        # self.set_style_for_widgets(self.cam_3d_send_keypoints_cb, 10, "black")
         #endregion
 
         #region UI elements for 3D phone processing
         # labels
         self.phone_3d_ip_label = QLabel("Phone IP Address:")
-        # self.phone_3d_ip_label.setFont(QFont("Arial", 12))
         self.phone_3d_scaling_time_label = QLabel("Scaling Duration (s):")
-        # self.phone_3d_scaling_time_label.setFont(QFont("Arial", 12))
         self.phone_3d_keypoints_filename_label = QLabel("Keypoints Filename:")
-        # self.phone_3d_keypoints_filename_label.setFont(QFont("Arial", 12))
         self.phone_3d_output_video_filename_label = QLabel("Processed Video Filename:")
-        # self.phone_3d_output_video_filename_label.setFont(QFont("Arial", 12))
         self.phone_3d_output_video_black_background_filename_label = QLabel("Processed Video with Black Background Filename:")
-        # self.phone_3d_output_video_black_background_filename_label.setFont(QFont("Arial", 12))
         self.phone_3d_port_label = QLabel("Port:")
-        # self.phone_3d_port_label.setFont(QFont("Arial", 12))
         # inputs
         self.phone_3d_ip_input = QLineEdit("192.168.1.107") # Default, user should change
-        # self.set_style_for_widgets(self.phone_3d_ip_input, 10, "black", "rgb(228, 195, 134)", "Enter your phone's IP address for 3D capture", Qt.CursorShape.IBeamCursor)
         self.phone_3d_scaling_time_input = QLineEdit("5")
-        # self.set_style_for_widgets(self.phone_3d_scaling_time_input, 10, "black", "rgb(228, 195, 134)", "Enter the time in seconds for T-Pose calibration", Qt.CursorShape.IBeamCursor)
         self.phone_3d_keypoints_filename_input = QLineEdit("keypoints_3d_phone.json")
-        # self.set_style_for_widgets(self.phone_3d_keypoints_filename_input, 10, "black", "rgb(228, 195, 134)", "Enter the filename for the 3D keypoints from phone", Qt.CursorShape.IBeamCursor)
         self.phone_3d_output_video_filename_input = QLineEdit("processed_video_3d_phone.mp4")
-        # self.set_style_for_widgets(self.phone_3d_output_video_filename_input, 10, "black", "rgb(228, 195, 134)", "Enter the filename for the processed 3D phone video", Qt.CursorShape.IBeamCursor)
         self.phone_3d_output_video_black_background_filename_input = QLineEdit("processed_video_3d_phone_black.mp4")
-        # self.set_style_for_widgets(self.phone_3d_output_video_black_background_filename_input, 10, "black", "rgb(228, 195, 134)", "Enter the filename for the processed 3D phone video with a black background", Qt.CursorShape.IBeamCursor)
         self.phone_3d_port_input = QLineEdit("8000")
-        # self.set_style_for_widgets(self.phone_3d_port_input, 10, "black", "rgb(228, 195, 134)", "Enter the port for sending keypoints", Qt.CursorShape.IBeamCursor)
         # checkboxes
         self.phone_3d_plot_landmarks_cb = QCheckBox("Plot Landmarks and Skeleton")
-        # self.set_style_for_widgets(self.phone_3d_plot_landmarks_cb, 10, "black")
         self.phone_3d_plot_values_cb = QCheckBox("Plot Values")
-        # self.set_style_for_widgets(self.phone_3d_plot_values_cb, 10, "black")
         self.phone_3d_save_keypoints_cb = QCheckBox("Save Keypoints as JSON")
-        # self.set_style_for_widgets(self.phone_3d_save_keypoints_cb, 10, "black")
         self.phone_3d_save_video_cb = QCheckBox("Save Video")
-        # self.set_style_for_widgets(self.phone_3d_save_video_cb, 10, "black")
         self.phone_3d_save_video_black_background_cb = QCheckBox("Save Video with Black Background")
-        # self.set_style_for_widgets(self.phone_3d_save_video_black_background_cb, 10, "black")
         self.phone_3d_send_keypoints_cb = QCheckBox("Send Keypoints over Network")
-        # self.set_style_for_widgets(self.phone_3d_send_keypoints_cb, 10, "black")
         #endregion
 
         # --- Hide all elements by default ---
-        self.hide_all_2D_source_options()
-        self.hide_all_3D_options()
+        self.hide_all_2D_sources_options()
+        self.hide_all_3D_sources_options()
         
         # --- Connect the UI elements to the appropriate functions ---
         self.dropdown.currentIndexChanged.connect(self.on_dimension_changed)
@@ -583,12 +485,14 @@ class MainWindow(QWidget):
         self.start_video_processing_signal.connect(self.worker.process_video)
         self.start_webcam_processing_signal.connect(self.worker.process_webcam)
         self.start_phone_processing_signal.connect(self.worker.process_phone_stream) 
-        # 3D fixed signals
+        # 3D signals
         self.start_3d_video_processing_signal.connect(self.worker.process_3d_video)
         self.start_3d_webcam_processing_signal.connect(self.worker.process_3d_webcam)
         self.start_3d_phone_processing_signal.connect(self.worker.process_3d_phone)
+        
         self.stop_worker_signal.connect(self.worker.stop) 
-
+        self.switch_the_model_signal.connect(self.worker.switch_model)
+        
         # Connect signals from the worker back to this (main) thread's slots
         self.worker.image_finished.connect(self.on_image_processing_finished)
         self.worker.video_finished.connect(self.on_video_processing_finished)
@@ -606,8 +510,8 @@ class MainWindow(QWidget):
         # Hide everything to start fresh
         self.dropdown_2d.hide()
         self.dropdown_3d.hide()
-        self.hide_all_2D_source_options()
-        self.hide_all_3D_options()
+        self.hide_all_2D_sources_options()
+        self.hide_all_3D_sources_options()
         self.uploaded_image_path = None
         self.uploaded_video_path = None
         
@@ -621,7 +525,7 @@ class MainWindow(QWidget):
     def on_source_2D_changed(self, index):
         source = self.dropdown_2d.currentText()
         # Hide everything first to ensure a clean slate
-        self.hide_all_2D_source_options()
+        self.hide_all_2D_sources_options()
 
         if source == 'Upload Image':
             self.img_browse_button.show()
@@ -641,17 +545,17 @@ class MainWindow(QWidget):
     def on_source_3D_changed(self, index):
         source = self.dropdown_3d.currentText()
         
-        self.hide_all_3D_options()
+        self.hide_all_3D_sources_options()
         
         if source == 'Upload Video':
             self.vid_3d_browse_button.show()
-            self.displayed_media_label.setText('Select a video for 3D Fixed processing.')
+            self.displayed_media_label.setText('Select a video for 3D processing.')
         elif source == 'Use Webcam':
             self.show_3d_webcam_options()
-            self.displayed_media_label.setText('Ready to start 3D Fixed Webcam. Press "Start".')
+            self.displayed_media_label.setText('Ready to start 3D Webcam. Press "Start".')
         elif source == 'Use Smartphone Camera':
             self.show_3d_phone_options() # To be implemented
-            self.displayed_media_label.setText('3D Fixed Smartphone processing is not yet implemented.')
+            self.displayed_media_label.setText('3D Smartphone processing is not yet implemented.')
         else:
             self.displayed_media_label.setText('Your selected media will be displayed here.')
     
@@ -1167,13 +1071,13 @@ class MainWindow(QWidget):
         self.cam_3d_send_keypoints_cb.show()
         self.on_3d_cam_send_keypoints_changed(self.cam_3d_send_keypoints_cb.checkState().value)
 
-    def hide_all_2D_source_options(self):
+    def hide_all_2D_sources_options(self):
         self.hide_image_options()
         self.hide_video_options()
         self.hide_webcam_options()
         self.hide_phone_options()
     
-    def hide_all_3D_options(self):
+    def hide_all_3D_sources_options(self):
         self.hide_3d_video_options()
         self.hide_3d_webcam_options()
         self.hide_3d_phone_options()
@@ -1524,7 +1428,15 @@ class MainWindow(QWidget):
         else:  # info or default
             self.status_label.setStyleSheet("")  # Use default theme styling
 
-
+    # --- For Switching Models ---
+    def set_light_model(self):
+        """Switch to light model"""
+        self.switch_the_model_signal.emit(1)
+    
+    def set_heavy_model(self):
+        """Switch to heavy model"""
+        self.switch_the_model_signal.emit(2)
+    
     # --- Dialog Methods ---
     def show_about_dialog(self):
         about_text = """
@@ -1571,7 +1483,7 @@ class MainWindow(QWidget):
         msg_box.setText(contact_text)
         msg_box.exec()
 
-
+    
 
 
 

@@ -18,20 +18,20 @@ class MediaProcessor:
     """
     Handles the entire media processing pipeline for images and videos.
     """ 
-    def __init__(self):
+    def __init__(self, model_complexity=1):
         """
         Initializes the MediaProcessor and both MediaPipe Pose models.
         """
         # Create a Pose instance for static images
         self.image_pose = mp.solutions.pose.Pose(
             static_image_mode=True,
-            model_complexity=2,
+            model_complexity=model_complexity,
             min_detection_confidence=0.5
         )
         # Create a separate Pose instance for video streams
         self.video_pose = mp.solutions.pose.Pose(
             static_image_mode=False,
-            model_complexity=1,
+            model_complexity=model_complexity,
             smooth_landmarks=True,
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5     

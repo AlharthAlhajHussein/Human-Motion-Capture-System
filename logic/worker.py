@@ -39,6 +39,13 @@ class Worker(QObject):
         self.media_processor = MediaProcessor()
         self.is_running = False # Flag to control the processing loop
 
+    def switch_model(self, model_comp):
+        """Switches the model complexity
+        Args:
+            model_complixity (int): The complexity of the model 1 light or 2 heavy
+        """
+        self.media_processor = MediaProcessor(model_complexity=model_comp)
+    
     def process_image(self, image_path, plot_landmarks, plot_skeleton, save_landmarks, landmark_filename, save_image, output_size_str, processed_image_filename, save_image_black, processed_image_black_background_filename):
         """A slot that processes the image and emits a signal when done."""
         try:
