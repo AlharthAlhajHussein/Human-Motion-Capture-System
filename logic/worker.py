@@ -4,22 +4,25 @@ import cv2
 import os
 import requests
 import numpy as np
-import time
+import matplotlib
 from logic.system_functions import (
     extract_2D_landmarks,
-    extract_3D_landmarks_fixed,
+    extract_3D_landmarks,
     calculate_extra_landmarks,
     get_required_landmark,
-    calculate_scaling_params,
-    scale_landmarks,
     denormalize_landmarks,
     project_landmarks,
     project_skeleton,
     project_special_values,
     save_keypoints,
+    get_depth_for_hip_keypoint,
+    shifting_keypoints_with_z_value,
+    get_norm_x_for_hip,
+    shifting_keypoints_with_x_value,
 )
 from logic.websocket_server import KeypointServer
-
+import torch
+from logic.depth_anything_v2.dpt import DepthAnythingV2
 
 class Worker(QObject):
     """
@@ -31,14 +34,49 @@ class Worker(QObject):
     video_finished = pyqtSignal(str)    # The 'str' will be a completion message
     new_frame_ready = pyqtSignal(object) # Signal to send a new processed frame
     error = pyqtSignal(str)             # The 'str' will be an error message
-    status_update = pyqtSignal(str)     # The 'str' will be a status message for the UI
 
-    def __init__(self):
+    def __init__(self, encoder='vits', checkpoint_path=None):
         super().__init__()
         # The MediaProcessor is now owned by the worker
         self.media_processor = MediaProcessor()
         self.is_running = False # Flag to control the processing loop
-
+        
+        # Device selection: CUDA > MPS > CPU
+        self.device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
+        print(f"Using device: {self.device}")
+        
+        # Model configurations for different encoders
+        self.model_configs = {
+            'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
+            'vitb': {'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]},
+            'vitl': {'encoder': 'vitl', 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
+            'vitg': {'encoder': 'vitg', 'features': 384, 'out_channels': [1536, 1536, 1536, 1536]}
+        }
+        
+        self.encoder = encoder
+        
+        # Initialize the model
+        self.model = DepthAnythingV2(**self.model_configs[encoder])
+        
+        # Load model weights
+        if checkpoint_path is None:
+            checkpoint_path = f'logic/checkpoints/depth_anything_v2_{encoder}.pth'
+        
+        try:
+            state_dict = torch.load(checkpoint_path, map_location="cpu")
+            self.model.load_state_dict(state_dict)
+            print(f"Model loaded successfully from: {checkpoint_path}")
+        except FileNotFoundError:
+            print(f"Error: Checkpoint file not found at {checkpoint_path}")
+            print("Please make sure you have downloaded the model weights.")
+            exit(1)
+        
+        # Move model to device and set to evaluation mode
+        self.model = self.model.to(self.device).eval()
+        
+        # Initialize colormap for depth visualization (Spectral_r gives nice colored depth maps)
+        self.cmap = matplotlib.colormaps.get_cmap('Spectral_r')
+                
     def switch_model(self, model_comp):
         """Switches the model complexity
         Args:
@@ -290,7 +328,8 @@ class Worker(QObject):
                 print(f"Phone video with black background saved to {video_black_background_filename}")
             self.is_running = False
 
-    def process_3d_video(self, video_path, scaling_time, message_time, plot_landmarks_skeleton, plot_values, save_keypoints_flag, keypoints_filename, save_video, video_filename, save_video_black, video_filename_black, send_keypoints, port):
+    def process_3d_video(self, video_path, plot_landmarks_skeleton, plot_values, save_keypoints_flag, keypoints_filename, save_video, video_filename, save_video_black, video_filename_black, send_keypoints, port):
+        
         self.is_running = True
         cap = None
         writer = None
@@ -300,65 +339,10 @@ class Worker(QObject):
             if send_keypoints:
                 server = KeypointServer(port)
                 server.start()
-            # --- Phase 1: Calibration ---
-            for i in range(message_time):
-                self.status_update.emit(f"Prepare for T-Pose calibration in {message_time-i} seconds...")
-                time.sleep(1)
-            
 
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
                 raise RuntimeError(f"Could not open video file: {video_path}")
-            
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            calibration_frames_count = int(scaling_time * fps)
-            all_calibration_landmarks = []
-            
-            for i in range(calibration_frames_count):
-                if not self.is_running:
-                    self.video_finished.emit("Processing stopped by user during calibration.")
-                    return
-                
-                ret, frame = cap.read()
-                if not ret:
-                    break # End of video before calibration finished
-
-                # Display countdown on UI
-                remaining_time = scaling_time - (i / fps)
-                self.status_update.emit(f"Hold T-Pose... Calibrating: {remaining_time:.1f}s remaining")
-                self.new_frame_ready.emit(frame) # Show the raw frame during calibration
-                
-                # Process for landmarks
-                results = self.media_processor.video_pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                if results.pose_world_landmarks:
-                    landmarks_3d_fixed = extract_3D_landmarks_fixed(results)
-                    extra_landmarks = calculate_extra_landmarks(landmarks_3d_fixed)
-                    required_landmarks = get_required_landmark(landmarks_3d_fixed, extra_landmarks)
-                    all_calibration_landmarks.append(required_landmarks)
-                
-                QCoreApplication.processEvents()
-
-            if not all_calibration_landmarks:
-                raise RuntimeError("Could not detect any landmarks during the calibration phase. Please ensure you are visible and in T-pose.")
-            
-            # Average the landmarks from the calibration phase
-            avg_landmarks = {}
-            for key in all_calibration_landmarks[0].keys():
-                avg_landmarks[key] = {
-                    'x': np.mean([frame[key]['x'] for frame in all_calibration_landmarks]),
-                    'y': np.mean([frame[key]['y'] for frame in all_calibration_landmarks]),
-                    'z': np.mean([frame[key]['z'] for frame in all_calibration_landmarks]),
-                    'name': key
-                }
-
-            # Calculate scaling parameters
-            w1, w2, lowest_point = calculate_scaling_params(avg_landmarks)
-            self.status_update.emit("Calibration Complete. Starting main processing...")
-            time.sleep(2) # Give user time to see the message
-
-            # --- Phase 2: Main Processing ---
-            # Reset video capture to the beginning
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             
             # Initialize video writers if needed
             ret, frame = cap.read()
@@ -381,19 +365,15 @@ class Worker(QObject):
                 
                 if results.pose_world_landmarks:
                     # Main 3D pipeline
-                    landmarks_3d_fixed = extract_3D_landmarks_fixed(results)
-                    extra_landmarks_3d = calculate_extra_landmarks(landmarks_3d_fixed)
-                    required_landmarks_3d = get_required_landmark(landmarks_3d_fixed, extra_landmarks_3d)
-                    
-                    # Create a copy for scaling, so the original isn't modified if needed elsewhere
-                    scaled_landmarks = {k: v.copy() for k, v in required_landmarks_3d.items()}
-                    scale_landmarks(scaled_landmarks, w1, w2, lowest_point)
-
+                    landmarks_3d = extract_3D_landmarks(results)
+                    extra_landmarks_3d = calculate_extra_landmarks(landmarks_3d)
+                    required_landmarks_3d = get_required_landmark(landmarks_3d, extra_landmarks_3d)
+                                        
                     if save_keypoints_flag:
-                        all_video_keypoints.append(scaled_landmarks)
+                        all_video_keypoints.append(required_landmarks_3d)
 
                     if server:
-                        server.broadcast(scaled_landmarks)
+                        server.broadcast(required_landmarks_3d)
 
                     # Drawing pipeline (needs 2D landmarks)
                     if plot_landmarks_skeleton or plot_values:
@@ -410,9 +390,9 @@ class Worker(QObject):
                                 project_skeleton(black_background_frame, required_landmarks_2d)
                         
                         if plot_values:
-                            project_special_values(display_frame, required_landmarks_2d, scaled_landmarks)
+                            project_special_values(display_frame, required_landmarks_2d, required_landmarks_3d)
                             if save_video_black:
-                                project_special_values(black_background_frame, required_landmarks_2d, scaled_landmarks)
+                                project_special_values(black_background_frame, required_landmarks_2d, required_landmarks_3d)
                 
                 if save_video:
                     self.new_frame_ready.emit(display_frame)
@@ -433,7 +413,7 @@ class Worker(QObject):
             if save_keypoints_flag and keypoints_filename:
                 save_keypoints(all_video_keypoints, keypoints_filename)
             
-            completion_message = "3D Fixed processing complete." if self.is_running else "Processing stopped by user."
+            completion_message = "3D processing complete." if self.is_running else "Processing stopped by user."
             self.video_finished.emit(completion_message)
 
         except Exception as e:
@@ -449,7 +429,7 @@ class Worker(QObject):
                 server.stop()
             self.is_running = False
 
-    def process_3d_webcam(self, scaling_time, message_time, plot_landmarks_skeleton, plot_values, save_keypoints_flag, keypoints_filename, save_video, video_filename, save_video_black, video_filename_black, send_keypoints, port):
+    def process_3d_webcam(self, plot_landmarks_skeleton, plot_values, save_keypoints_flag, keypoints_filename, save_video, video_filename, save_video_black, video_filename_black, send_keypoints, port):
         self.is_running = True
         cap = None
         writer = None
@@ -459,60 +439,14 @@ class Worker(QObject):
             if send_keypoints:
                 server = KeypointServer(port)
                 server.start()
-            
-            # --- Phase 1: Calibration ---
-            for i in range(message_time):
-                self.status_update.emit(f"Prepare for T-Pose calibration in {message_time-i} seconds...")
-                time.sleep(1)
 
             cap = cv2.VideoCapture(0)
             if not cap.isOpened():
                 raise RuntimeError("Could not open webcam.")
             
             fps = 15 # Assume a reasonable FPS for webcam saving
-            start_time = time.time()
-            all_calibration_landmarks = []
-            
-            while time.time() - start_time < scaling_time:
-                if not self.is_running:
-                    self.video_finished.emit("Processing stopped by user during calibration.")
-                    return
-                
-                ret, frame = cap.read()
-                if not ret:
-                    self.error.emit("Failed to get frame from webcam during calibration.")
-                    break
 
-                remaining_time = scaling_time - (time.time() - start_time)
-                self.status_update.emit(f"Hold T-Pose... Calibrating: {remaining_time:.1f}s remaining")
-                self.new_frame_ready.emit(frame)
-                
-                results = self.media_processor.video_pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                if results.pose_world_landmarks:
-                    landmarks_3d_fixed = extract_3D_landmarks_fixed(results)
-                    extra_landmarks = calculate_extra_landmarks(landmarks_3d_fixed)
-                    required_landmarks = get_required_landmark(landmarks_3d_fixed, extra_landmarks)
-                    all_calibration_landmarks.append(required_landmarks)
-                
-                QCoreApplication.processEvents()
-
-            if not all_calibration_landmarks:
-                raise RuntimeError("Could not detect any landmarks during the calibration phase. Please ensure you are visible and in T-pose.")
-            
-            avg_landmarks = {}
-            for key in all_calibration_landmarks[0].keys():
-                avg_landmarks[key] = {
-                    'x': np.mean([frame[key]['x'] for frame in all_calibration_landmarks]),
-                    'y': np.mean([frame[key]['y'] for frame in all_calibration_landmarks]),
-                    'z': np.mean([frame[key]['z'] for frame in all_calibration_landmarks]),
-                    'name': key
-                }
-
-            w1, w2, lowest_point = calculate_scaling_params(avg_landmarks)
-            self.status_update.emit("Calibration Complete. Starting main processing...")
-            time.sleep(2)
-
-            # --- Phase 2: Main Processing ---
+            # --- Main Processing ---
             if save_video:
                 writer = self.init_writer_webcam(cap, video_filename, fps)
             if save_video_black:
@@ -532,18 +466,15 @@ class Worker(QObject):
                 results = self.media_processor.video_pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 
                 if results.pose_world_landmarks:
-                    landmarks_3d_fixed = extract_3D_landmarks_fixed(results)
-                    extra_landmarks_3d = calculate_extra_landmarks(landmarks_3d_fixed)
-                    required_landmarks_3d = get_required_landmark(landmarks_3d_fixed, extra_landmarks_3d)
+                    landmarks_3d = extract_3D_landmarks(results)
+                    extra_landmarks_3d = calculate_extra_landmarks(landmarks_3d)
+                    required_landmarks_3d = get_required_landmark(landmarks_3d, extra_landmarks_3d)
                     
-                    scaled_landmarks = {k: v.copy() for k, v in required_landmarks_3d.items()}
-                    scale_landmarks(scaled_landmarks, w1, w2, lowest_point)
-
                     if save_keypoints_flag:
-                        all_video_keypoints.append(scaled_landmarks)
+                        all_video_keypoints.append(required_landmarks_3d)
                     
                     if server:
-                        server.broadcast(scaled_landmarks)
+                        server.broadcast(required_landmarks_3d)
 
                     if plot_landmarks_skeleton or plot_values:
                         landmarks_2d = extract_2D_landmarks(results)
@@ -559,9 +490,9 @@ class Worker(QObject):
                                 project_skeleton(black_background_frame, required_landmarks_2d)
                         
                         if plot_values:
-                            project_special_values(display_frame, required_landmarks_2d, scaled_landmarks)
+                            project_special_values(display_frame, required_landmarks_2d, required_landmarks_3d)
                             if save_video_black:
-                                project_special_values(black_background_frame, required_landmarks_2d, scaled_landmarks)
+                                project_special_values(black_background_frame, required_landmarks_2d, required_landmarks_3d)
                 
                 if save_video:
                     self.new_frame_ready.emit(display_frame)
@@ -580,7 +511,7 @@ class Worker(QObject):
             if save_keypoints_flag and keypoints_filename:
                 save_keypoints(all_video_keypoints, keypoints_filename)
             
-            completion_message = "3D Fixed Webcam processing complete." if self.is_running else "Processing stopped by user."
+            completion_message = "3D Webcam processing complete." if self.is_running else "Processing stopped by user."
             self.video_finished.emit(completion_message)
 
         except Exception as e:
@@ -596,7 +527,7 @@ class Worker(QObject):
                 server.stop()
             self.is_running = False
 
-    def process_3d_phone(self, ip_address, scaling_time, message_time, plot_landmarks_skeleton, plot_values, save_keypoints_flag, keypoints_filename, save_video, video_filename, save_video_black, video_filename_black, send_keypoints, port):
+    def process_3d_phone(self, ip_address, plot_landmarks_skeleton, plot_values, save_keypoints_flag, keypoints_filename, save_video, video_filename, save_video_black, video_filename_black, send_keypoints, port):
         self.is_running = True
         writer = None
         writer_black = None
@@ -609,14 +540,6 @@ class Worker(QObject):
             
             url = f"http://{ip_address}:8080/shot.jpg"
             print(f"Attempting to connect to phone camera at: {url}")
-
-            # --- Phase 1: Calibration ---
-            for i in range(message_time):
-                self.status_update.emit(f"Prepare for T-Pose calibration in {message_time-i} seconds...")
-                time.sleep(1)
-            
-            start_time = time.time()
-            all_calibration_landmarks = []
             
             # Try to get one frame to initialize writers
             first_frame = None
@@ -630,53 +553,7 @@ class Worker(QObject):
             except requests.exceptions.RequestException as e:
                 raise RuntimeError(f"Could not connect to phone camera to initialize. Check IP. Error: {e}")
 
-            while time.time() - start_time < scaling_time:
-                if not self.is_running:
-                    self.video_finished.emit("Processing stopped by user during calibration.")
-                    return
-                
-                try:
-                    img_resp = requests.get(url, timeout=1.5)
-                    img_arr = np.frombuffer(img_resp.content, dtype=np.uint8)
-                    frame = cv2.imdecode(img_arr, -1)
-                    if frame is None:
-                        print("Warning: Skipped a bad frame from phone during calibration.")
-                        continue
-                except requests.exceptions.RequestException:
-                    print(f"Warning: Failed to get a frame from phone camera. Will retry.")
-                    QCoreApplication.processEvents()
-                    continue
-
-                remaining_time = scaling_time - (time.time() - start_time)
-                self.status_update.emit(f"Hold T-Pose... Calibrating: {remaining_time:.1f}s remaining")
-                self.new_frame_ready.emit(frame)
-                
-                results = self.media_processor.video_pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                if results.pose_world_landmarks:
-                    landmarks_3d_fixed = extract_3D_landmarks_fixed(results)
-                    extra_landmarks = calculate_extra_landmarks(landmarks_3d_fixed)
-                    required_landmarks = get_required_landmark(landmarks_3d_fixed, extra_landmarks)
-                    all_calibration_landmarks.append(required_landmarks)
-                
-                QCoreApplication.processEvents()
-
-            if not all_calibration_landmarks:
-                raise RuntimeError("Could not detect any landmarks during the calibration phase. Please ensure you are visible and in T-pose.")
-            
-            avg_landmarks = {}
-            for key in all_calibration_landmarks[0].keys():
-                avg_landmarks[key] = {
-                    'x': np.mean([frame[key]['x'] for frame in all_calibration_landmarks]),
-                    'y': np.mean([frame[key]['y'] for frame in all_calibration_landmarks]),
-                    'z': np.mean([frame[key]['z'] for frame in all_calibration_landmarks]),
-                    'name': key
-                }
-
-            w1, w2, lowest_point = calculate_scaling_params(avg_landmarks)
-            self.status_update.emit("Calibration Complete. Starting main processing...")
-            time.sleep(2)
-
-            # --- Phase 2: Main Processing ---
+            # --- Main Processing ---
             if save_video:
                 writer = self.init_writer_phone(video_filename, 7, first_frame)
             if save_video_black:
@@ -703,18 +580,15 @@ class Worker(QObject):
                 results = self.media_processor.video_pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 
                 if results.pose_world_landmarks:
-                    landmarks_3d_fixed = extract_3D_landmarks_fixed(results)
-                    extra_landmarks_3d = calculate_extra_landmarks(landmarks_3d_fixed)
-                    required_landmarks_3d = get_required_landmark(landmarks_3d_fixed, extra_landmarks_3d)
-                    
-                    scaled_landmarks = {k: v.copy() for k, v in required_landmarks_3d.items()}
-                    scale_landmarks(scaled_landmarks, w1, w2, lowest_point)
+                    landmarks_3d = extract_3D_landmarks(results)
+                    extra_landmarks_3d = calculate_extra_landmarks(landmarks_3d)
+                    required_landmarks_3d = get_required_landmark(landmarks_3d, extra_landmarks_3d)
 
                     if save_keypoints_flag:
-                        all_video_keypoints.append(scaled_landmarks)
+                        all_video_keypoints.append(required_landmarks_3d)
                     
                     if server:
-                        server.broadcast(scaled_landmarks)
+                        server.broadcast(required_landmarks_3d)
 
                     if plot_landmarks_skeleton or plot_values:
                         landmarks_2d = extract_2D_landmarks(results)
@@ -730,9 +604,9 @@ class Worker(QObject):
                                 project_skeleton(black_background_frame, required_landmarks_2d)
                         
                         if plot_values:
-                            project_special_values(display_frame, required_landmarks_2d, scaled_landmarks)
+                            project_special_values(display_frame, required_landmarks_2d, required_landmarks_3d)
                             if save_video_black and black_background_frame is not None:
-                                project_special_values(black_background_frame, required_landmarks_2d, scaled_landmarks)
+                                project_special_values(black_background_frame, required_landmarks_2d, required_landmarks_3d)
                 
                 if save_video:
                     self.new_frame_ready.emit(display_frame)
@@ -751,12 +625,138 @@ class Worker(QObject):
             if save_keypoints_flag and keypoints_filename:
                 save_keypoints(all_video_keypoints, keypoints_filename)
             
-            completion_message = "3D Fixed Phone processing complete." if self.is_running else "Processing stopped by user."
+            completion_message = "3D Phone processing complete." if self.is_running else "Processing stopped by user."
             self.video_finished.emit(completion_message)
 
         except Exception as e:
             self.error.emit(str(e))
         finally:
+            if writer:
+                writer.release()
+            if writer_black:
+                writer_black.release()
+            if server:
+                server.stop()
+            self.is_running = False
+
+    def process_3d_video_with_depth_model(self, video_path, use_depth_model, display_depth_map, plot_landmarks_skeleton, plot_values, save_keypoints_flag, keypoints_filename, save_video, video_filename, save_video_black, video_filename_black, send_keypoints, port):
+        
+        self.is_running = True
+        cap = None
+        writer = None
+        writer_black = None
+        server = None
+        try:
+            if send_keypoints:
+                server = KeypointServer(port)
+                server.start()
+
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                raise RuntimeError(f"Could not open video file: {video_path}")
+            
+            # Initialize video writers if needed
+            ret, frame = cap.read()
+            if save_video and video_filename:
+                writer = self.init_writer(cap, video_filename, frame)
+            if save_video_black and video_filename_black:
+                writer_black = self.init_writer(cap, video_filename_black, frame)
+            
+            all_video_keypoints = []
+            store_last_5_frames = []
+            
+            while self.is_running:
+                ret, frame = cap.read()
+                if not ret:
+                    break # End of video
+
+                display_frame = frame.copy()
+                black_background_frame = np.zeros_like(frame) if save_video_black else None
+
+                results = self.media_processor.video_pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                
+                if results.pose_world_landmarks:
+                    # Main 3D pipeline
+                    landmarks_3d = extract_3D_landmarks(results)
+                    extra_landmarks_3d = calculate_extra_landmarks(landmarks_3d)
+                    required_landmarks_3d = get_required_landmark(landmarks_3d, extra_landmarks_3d)
+                    
+                    if use_depth_model:
+                        # Use the Depth model and get the depth value for the hip keypoint
+                        with torch.no_grad():  # Disable gradient computation for faster inference
+                            depth_map = self.model.infer_image(display_frame)
+                            
+                        # Get the Z value from the depth map and store it in a list
+                        hip_z = get_depth_for_hip_keypoint(required_landmarks_3d, depth_map, display_frame)
+                        store_last_5_frames.append(hip_z)
+                        
+                        # check if you have more then 5 fram pass to start shifting the keypoints
+                        if len(store_last_5_frames) > 5:
+                            length = len(store_last_5_frames)
+                            hip_z_avg = float(round(np.mean(store_last_5_frames[length-5:]), 3))
+                            shifting_keypoints_with_z_value(required_landmarks_3d, hip_z_avg)
+                        
+                        if display_depth_map:
+                            colored_map = self.process_depth_map(depth_map)
+                        
+                        
+                    norm_hip_x = get_norm_x_for_hip(results)
+                    shifting_keypoints_with_x_value(norm_hip_x, display_frame, required_landmarks_3d)
+                    
+                    if save_keypoints_flag:
+                        all_video_keypoints.append(required_landmarks_3d)
+
+                    if server:
+                        server.broadcast(required_landmarks_3d)
+
+                    # Drawing pipeline (needs 2D landmarks)
+                    if plot_landmarks_skeleton or plot_values:
+                        landmarks_2d = extract_2D_landmarks(results)
+                        extra_landmarks_2d = calculate_extra_landmarks(landmarks_2d)
+                        required_landmarks_2d = get_required_landmark(landmarks_2d, extra_landmarks_2d)
+                        denormalize_landmarks(display_frame, required_landmarks_2d)
+
+                        if plot_landmarks_skeleton:
+                            project_landmarks(display_frame, required_landmarks_2d)
+                            project_skeleton(display_frame, required_landmarks_2d)
+                            if save_video_black:
+                                project_landmarks(black_background_frame, required_landmarks_2d)
+                                project_skeleton(black_background_frame, required_landmarks_2d)
+                        
+                        if plot_values:
+                            project_special_values(display_frame, required_landmarks_2d, required_landmarks_3d)
+                            if save_video_black:
+                                project_special_values(black_background_frame, required_landmarks_2d, required_landmarks_3d)
+                
+                if display_depth_map and colored_map is not None:
+                    self.new_frame_ready.emit(colored_map)
+                elif save_video:
+                    self.new_frame_ready.emit(display_frame)
+                elif save_video_black and black_background_frame is not None:
+                    self.new_frame_ready.emit(black_background_frame)
+                else:
+                    self.new_frame_ready.emit(display_frame)
+                
+                # Write frames to video files
+                if writer:
+                    writer.write(display_frame)
+                if writer_black:
+                    writer_black.write(black_background_frame)
+
+                QCoreApplication.processEvents()
+            
+            # --- Cleanup ---
+            if save_keypoints_flag and keypoints_filename:
+                save_keypoints(all_video_keypoints, keypoints_filename)
+            
+            completion_message = "3D processing complete." if self.is_running else "Processing stopped by user."
+            self.video_finished.emit(completion_message)
+
+        except Exception as e:
+            self.error.emit(str(e))
+        finally:
+            if cap:
+                cap.release()
             if writer:
                 writer.release()
             if writer_black:
@@ -800,3 +800,22 @@ class Worker(QObject):
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         writer = cv2.VideoWriter(video_path, fourcc, fps, (frame_width, frame_height))
         return writer
+
+    def process_depth_map(self, depth):
+        """
+        Process raw depth map to colored visualization
+        
+        Args:
+            depth (numpy.ndarray): Raw depth map
+            
+        Returns:
+            tuple: (colored_depth_map, raw_depth_map) - BGR format for OpenCV
+        """
+        # Normalize depth values to 0-255 range for visualization
+        depth_normalized = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
+        depth_normalized = depth_normalized.astype(np.uint8)
+        
+        # Apply colormap (convert from RGB to BGR for OpenCV)
+        colored_depth = (self.cmap(depth_normalized)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+        
+        return colored_depth

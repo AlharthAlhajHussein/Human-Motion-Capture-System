@@ -38,9 +38,10 @@ class MainWindow(QWidget):
     start_webcam_processing_signal = pyqtSignal(bool, bool, bool, bool, bool, str, str, bool, str)
     start_phone_processing_signal = pyqtSignal(str, bool, bool, bool, bool, bool, str, str, bool, str)
     # 3D signals
-    start_3d_video_processing_signal = pyqtSignal(str, int, int, bool, bool, bool, str, bool, str, bool, str, bool, int)
-    start_3d_webcam_processing_signal = pyqtSignal(int, int, bool, bool, bool, str, bool, str, bool, str, bool, int)
-    start_3d_phone_processing_signal = pyqtSignal(str, int, int, bool, bool, bool, str, bool, str, bool, str, bool, int)
+    start_3d_video_processing_signal = pyqtSignal(str, bool, bool, bool, str, bool, str, bool, str, bool, int)
+    start_3d_webcam_processing_signal = pyqtSignal(bool, bool, bool, str, bool, str, bool, str, bool, int)
+    start_3d_phone_processing_signal = pyqtSignal(str, bool, bool, bool, str, bool, str, bool, str, bool, int)
+    start_3d_depth_video_processing_signal = pyqtSignal(str, bool, bool, bool, bool, bool, str, bool, str, bool, str, bool, int)
     stop_worker_signal = pyqtSignal() 
     switch_the_model_signal = pyqtSignal(int)
     
@@ -57,10 +58,11 @@ class MainWindow(QWidget):
         self.apply_theme('light')  # Apply modern theme
 
     def initUI(self):
-        self.setWindowTitle('2D and 3D Human Motion Capture System')
+        self.setWindowTitle('Human Motion Capture System')
         self.setWindowIcon(QIcon('resources/icons/main_window_icon.png'))
 
-        # --- Create Menu Bar ---
+        
+        #region --- Create Menu Bar --- 
         self.menu_bar = QMenuBar(self)
         
         # --- Settings Menu ---
@@ -91,7 +93,8 @@ class MainWindow(QWidget):
         contact_action = QAction('Contact Us', self)
         contact_action.triggered.connect(self.show_contact_dialog)
         help_menu.addAction(contact_action)
-
+        #endregion
+        
         # --- Create the start and end buttons ---
         self.start_button = QPushButton('Start')
         self.start_button.setMinimumWidth(200)
@@ -123,7 +126,7 @@ class MainWindow(QWidget):
 
         # --- secondary 3D dropdown for selecting the source of the media ---
         self.dropdown_3d = QComboBox()
-        self.dropdown_3d.addItems(['Select Source...', 'Upload Video', 'Use Webcam', 'Use Smartphone Camera'])
+        self.dropdown_3d.addItems(['Select Source...', 'Upload Video', 'Use Webcam', 'Use Smartphone Camera', 'Upload Video with Depth Model'])
         self.dropdown_3d.hide()
 
         #! name convention is : (type ofsource)_(type of processing)_(variable name)_(UI name)
@@ -212,13 +215,11 @@ class MainWindow(QWidget):
         # buttons
         self.vid_3d_browse_button = QPushButton('Browse for Video...')
         # labels
-        self.vid_3d_scaling_time_label = QLabel("Scaling Duration (s):")
         self.vid_3d_keypoints_filename_label = QLabel("Keypoints Filename:")
         self.vid_3d_output_video_filename_label = QLabel("Processed Video Filename:")
         self.vid_3d_output_video_black_background_filename_label = QLabel("Processed Video with Black Background Filename:")
         self.vid_3d_port_label = QLabel("Port:")
         # inputs
-        self.vid_3d_scaling_time_input = QLineEdit("5")
         self.vid_3d_keypoints_filename_input = QLineEdit("keypoints_3d.json")
         self.vid_3d_output_video_filename_input = QLineEdit("processed_video_3d.mp4")
         self.vid_3d_output_video_black_background_filename_input = QLineEdit("processed_video_3d_black.mp4")
@@ -234,13 +235,11 @@ class MainWindow(QWidget):
 
         #region UI elements for 3D webcam processing
         # labels
-        self.cam_3d_scaling_time_label = QLabel("Scaling Duration (s):")
         self.cam_3d_keypoints_filename_label = QLabel("Keypoints Filename:")
         self.cam_3d_output_video_filename_label = QLabel("Processed Video Filename:")
         self.cam_3d_output_video_black_background_filename_label = QLabel("Processed Video with Black Background Filename:")
         self.cam_3d_port_label = QLabel("Port:")
         # inputs
-        self.cam_3d_scaling_time_input = QLineEdit("5")
         self.cam_3d_keypoints_filename_input = QLineEdit("keypoints_3d_webcam.json")
         self.cam_3d_output_video_filename_input = QLineEdit("processed_video_3d_webcam.mp4")
         self.cam_3d_output_video_black_background_filename_input = QLineEdit("processed_video_3d_webcam_black.mp4")
@@ -257,14 +256,12 @@ class MainWindow(QWidget):
         #region UI elements for 3D phone processing
         # labels
         self.phone_3d_ip_label = QLabel("Phone IP Address:")
-        self.phone_3d_scaling_time_label = QLabel("Scaling Duration (s):")
         self.phone_3d_keypoints_filename_label = QLabel("Keypoints Filename:")
         self.phone_3d_output_video_filename_label = QLabel("Processed Video Filename:")
         self.phone_3d_output_video_black_background_filename_label = QLabel("Processed Video with Black Background Filename:")
         self.phone_3d_port_label = QLabel("Port:")
         # inputs
         self.phone_3d_ip_input = QLineEdit("192.168.1.107") # Default, user should change
-        self.phone_3d_scaling_time_input = QLineEdit("5")
         self.phone_3d_keypoints_filename_input = QLineEdit("keypoints_3d_phone.json")
         self.phone_3d_output_video_filename_input = QLineEdit("processed_video_3d_phone.mp4")
         self.phone_3d_output_video_black_background_filename_input = QLineEdit("processed_video_3d_phone_black.mp4")
@@ -278,6 +275,30 @@ class MainWindow(QWidget):
         self.phone_3d_send_keypoints_cb = QCheckBox("Send Keypoints over Network")
         #endregion
 
+        #region UI elements for 3D video processing with Depth anything V2 model
+        # buttons
+        self.vid_3d_depth_browse_button = QPushButton('Browse for Video...')
+        # labels
+        self.vid_3d_depth_keypoints_filename_label = QLabel("Keypoints Filename:")
+        self.vid_3d_depth_output_video_filename_label = QLabel("Processed Video Filename:")
+        self.vid_3d_depth_output_video_black_background_filename_label = QLabel("Processed Video with Black Background Filename:")
+        self.vid_3d_depth_port_label = QLabel("Port:")
+        # inputs
+        self.vid_3d_depth_keypoints_filename_input = QLineEdit("keypoints_3d.json")
+        self.vid_3d_depth_output_video_filename_input = QLineEdit("processed_video_3d.mp4")
+        self.vid_3d_depth_output_video_black_background_filename_input = QLineEdit("processed_video_3d_black.mp4")
+        self.vid_3d_depth_port_input = QLineEdit("8000")
+        # checkboxes
+        self.vid_3d_depth_disp_depth_map_ch = QCheckBox("Display The Depth Map")
+        self.vid_3d_depth_use_depth_model_cb = QCheckBox("Use The Depth Anything v2 Model")
+        self.vid_3d_depth_plot_landmarks_cb = QCheckBox("Plot Landmarks and Skeleton")
+        self.vid_3d_depth_plot_values_cb = QCheckBox("Plot Values")
+        self.vid_3d_depth_save_keypoints_cb = QCheckBox("Save Keypoints as JSON")
+        self.vid_3d_depth_save_video_cb = QCheckBox("Save Video")
+        self.vid_3d_depth_save_video_black_background_cb = QCheckBox("Save Video with Black Background")
+        self.vid_3d_depth_send_keypoints_cb = QCheckBox("Send Keypoints over Network")
+        #endregion
+        
         # --- Hide all elements by default ---
         self.hide_all_2D_sources_options()
         self.hide_all_3D_sources_options()
@@ -322,6 +343,13 @@ class MainWindow(QWidget):
         self.phone_3d_save_video_cb.stateChanged.connect(self.on_3d_phone_save_video_changed)
         self.phone_3d_save_video_black_background_cb.stateChanged.connect(self.on_3d_phone_save_video_black_background_changed)
         self.phone_3d_send_keypoints_cb.stateChanged.connect(self.on_3d_phone_send_keypoints_changed)
+        
+        self.vid_3d_depth_browse_button.clicked.connect(self.open_video_dialog) # Can reuse the same dialog
+        self.vid_3d_depth_save_keypoints_cb.stateChanged.connect(self.on_3d_depth_video_save_keypoints_changed)
+        self.vid_3d_depth_save_video_cb.stateChanged.connect(self.on_3d_depth_video_save_video_changed)
+        self.vid_3d_depth_save_video_black_background_cb.stateChanged.connect(self.on_3d_depth_video_save_video_black_background_changed)
+        self.vid_3d_depth_send_keypoints_cb.stateChanged.connect(self.on_3d_depth_video_send_keypoints_changed)
+        
         #endregion
 
         # --- Main Layout ---
@@ -397,8 +425,6 @@ class MainWindow(QWidget):
         controls_layout.addWidget(self.phone_output_video_black_background_filename_input)
         # Add 3D video widgets to layout
         controls_layout.addWidget(self.vid_3d_browse_button)
-        controls_layout.addWidget(self.vid_3d_scaling_time_label)
-        controls_layout.addWidget(self.vid_3d_scaling_time_input)
         controls_layout.addWidget(self.vid_3d_plot_landmarks_cb)
         controls_layout.addWidget(self.vid_3d_plot_values_cb)
         controls_layout.addWidget(self.vid_3d_save_keypoints_cb)
@@ -414,8 +440,6 @@ class MainWindow(QWidget):
         controls_layout.addWidget(self.vid_3d_port_label)
         controls_layout.addWidget(self.vid_3d_port_input)
         # Add 3D webcam widgets to layout
-        controls_layout.addWidget(self.cam_3d_scaling_time_label)
-        controls_layout.addWidget(self.cam_3d_scaling_time_input)
         controls_layout.addWidget(self.cam_3d_plot_landmarks_cb)
         controls_layout.addWidget(self.cam_3d_plot_values_cb)
         controls_layout.addWidget(self.cam_3d_save_keypoints_cb)
@@ -433,8 +457,6 @@ class MainWindow(QWidget):
         # Add 3D phone widgets to layout
         controls_layout.addWidget(self.phone_3d_ip_label)
         controls_layout.addWidget(self.phone_3d_ip_input)
-        controls_layout.addWidget(self.phone_3d_scaling_time_label)
-        controls_layout.addWidget(self.phone_3d_scaling_time_input)
         controls_layout.addWidget(self.phone_3d_plot_landmarks_cb)
         controls_layout.addWidget(self.phone_3d_plot_values_cb)
         controls_layout.addWidget(self.phone_3d_save_keypoints_cb)
@@ -449,6 +471,26 @@ class MainWindow(QWidget):
         controls_layout.addWidget(self.phone_3d_send_keypoints_cb)
         controls_layout.addWidget(self.phone_3d_port_label)
         controls_layout.addWidget(self.phone_3d_port_input)
+        
+        # Add 3D video with Depth Model widgets to layout
+        
+        controls_layout.addWidget(self.vid_3d_depth_browse_button)
+        controls_layout.addWidget(self.vid_3d_depth_use_depth_model_cb)
+        controls_layout.addWidget(self.vid_3d_depth_disp_depth_map_ch)
+        controls_layout.addWidget(self.vid_3d_depth_plot_landmarks_cb)
+        controls_layout.addWidget(self.vid_3d_depth_plot_values_cb)
+        controls_layout.addWidget(self.vid_3d_depth_save_keypoints_cb)
+        controls_layout.addWidget(self.vid_3d_depth_keypoints_filename_label)
+        controls_layout.addWidget(self.vid_3d_depth_keypoints_filename_input)
+        controls_layout.addWidget(self.vid_3d_depth_save_video_cb)
+        controls_layout.addWidget(self.vid_3d_depth_output_video_filename_label)
+        controls_layout.addWidget(self.vid_3d_depth_output_video_filename_input)
+        controls_layout.addWidget(self.vid_3d_depth_save_video_black_background_cb)
+        controls_layout.addWidget(self.vid_3d_depth_output_video_black_background_filename_label)
+        controls_layout.addWidget(self.vid_3d_depth_output_video_black_background_filename_input)
+        controls_layout.addWidget(self.vid_3d_depth_send_keypoints_cb)
+        controls_layout.addWidget(self.vid_3d_depth_port_label)
+        controls_layout.addWidget(self.vid_3d_depth_port_input)
         #endregion
         
         # Add a "spacer" to push all the controls to the top of the column
@@ -459,7 +501,6 @@ class MainWindow(QWidget):
         # Create a vertical layout for the media display and status label
         media_layout = QVBoxLayout()
         media_layout.addWidget(self.displayed_media_label, 1) # Give it stretch factor
-        media_layout.addWidget(self.status_label)
 
         # Add the media layout to the main layout (it will be the left column)
         main_layout.addLayout(media_layout, 3) # The '3' gives it more horizontal stretch space
@@ -489,7 +530,7 @@ class MainWindow(QWidget):
         self.start_3d_video_processing_signal.connect(self.worker.process_3d_video)
         self.start_3d_webcam_processing_signal.connect(self.worker.process_3d_webcam)
         self.start_3d_phone_processing_signal.connect(self.worker.process_3d_phone)
-        
+        self.start_3d_depth_video_processing_signal.connect(self.worker.process_3d_video_with_depth_model)
         self.stop_worker_signal.connect(self.worker.stop) 
         self.switch_the_model_signal.connect(self.worker.switch_model)
         
@@ -497,7 +538,6 @@ class MainWindow(QWidget):
         self.worker.image_finished.connect(self.on_image_processing_finished)
         self.worker.video_finished.connect(self.on_video_processing_finished)
         self.worker.new_frame_ready.connect(self.display_processed_image) # Connect new frame signal
-        self.worker.status_update.connect(self.update_status_label)
         self.worker.error.connect(self.on_processing_error)
 
         # Connect thread management signals
@@ -556,6 +596,9 @@ class MainWindow(QWidget):
         elif source == 'Use Smartphone Camera':
             self.show_3d_phone_options() # To be implemented
             self.displayed_media_label.setText('3D Smartphone processing is not yet implemented.')
+        elif source == 'Upload Video with Depth Model':
+            self.vid_3d_depth_browse_button.show()
+            self.displayed_media_label.setText('Select a video for 3D processing with Depth Model.')
         else:
             self.displayed_media_label.setText('Your selected media will be displayed here.')
     
@@ -588,7 +631,11 @@ class MainWindow(QWidget):
             if self.dropdown.currentText() == '2D':
                 self.show_video_options()
             elif self.dropdown.currentText() == '3D':
-                self.show_3d_video_options()
+                source = self.dropdown_3d.currentText()
+                if source == 'Upload Video':
+                    self.show_3d_video_options()
+                elif source == 'Upload Video with Depth Model':
+                    self.show_3d_depth_video_options()
 
     def start_processing(self):
         """Determines which processing to start based on dropdown selection."""
@@ -724,15 +771,10 @@ class MainWindow(QWidget):
                 QMessageBox.warning(self, "Warning", "Please enter your phone's IP address.")
 
     def start_3d_processing(self):
-        """Handles starting all 3D-fixed processing tasks."""
+        """Handles starting all 3D processing tasks."""
         source = self.dropdown_3d.currentText()
         if source == 'Upload Video':
             if self.uploaded_video_path:
-                try:
-                    scaling_time = int(self.vid_3d_scaling_time_input.text())
-                except ValueError:
-                    QMessageBox.warning(self, "Warning", "Please enter a valid integer for scaling duration.")
-                    return
 
                 send_keypoints = self.vid_3d_send_keypoints_cb.isChecked()
                 port = 0
@@ -743,7 +785,7 @@ class MainWindow(QWidget):
                         QMessageBox.warning(self, "Warning", "Please enter a valid integer for the port.")
                         return
 
-                print("Starting 3D fixed video processing...")
+                print("Starting 3D video processing...")
                 self.set_ui_enabled(False)
 
                 # Get parameters from UI
@@ -755,12 +797,9 @@ class MainWindow(QWidget):
                 video_filename = self.vid_3d_output_video_filename_input.text()
                 save_video_black = self.vid_3d_save_video_black_background_cb.isChecked()
                 video_filename_black = self.vid_3d_output_video_black_background_filename_input.text()
-                message_time = 3
                 
                 self.start_3d_video_processing_signal.emit(
                     self.uploaded_video_path,
-                    scaling_time,
-                    message_time,
                     plot_landmarks_skeleton,
                     plot_values,
                     save_keypoints,
@@ -775,11 +814,6 @@ class MainWindow(QWidget):
             else:
                 QMessageBox.warning(self, "Warning", "Please select a video first.")
         elif source == 'Use Webcam':
-            try:
-                scaling_time = int(self.cam_3d_scaling_time_input.text())
-            except ValueError:
-                QMessageBox.warning(self, "Warning", "Please enter a valid integer for scaling duration.")
-                return
 
             send_keypoints = self.cam_3d_send_keypoints_cb.isChecked()
             port = 0
@@ -801,11 +835,8 @@ class MainWindow(QWidget):
             video_filename = self.cam_3d_output_video_filename_input.text()
             save_video_black = self.cam_3d_save_video_black_background_cb.isChecked()
             video_filename_black = self.cam_3d_output_video_black_background_filename_input.text()
-            message_time = 3
 
             self.start_3d_webcam_processing_signal.emit(
-                scaling_time,
-                message_time,
                 plot_landmarks_skeleton,
                 plot_values,
                 save_keypoints,
@@ -817,17 +848,10 @@ class MainWindow(QWidget):
                 send_keypoints,
                 port
             )
-
         elif source == 'Use Smartphone Camera':
             phone_ip = self.phone_3d_ip_input.text()
             if not phone_ip:
                 QMessageBox.warning(self, "Warning", "Please enter the phone's IP address.")
-                return
-
-            try:
-                scaling_time = int(self.phone_3d_scaling_time_input.text())
-            except ValueError:
-                QMessageBox.warning(self, "Warning", "Please enter a valid integer for scaling duration.")
                 return
 
             send_keypoints = self.phone_3d_send_keypoints_cb.isChecked()
@@ -850,12 +874,9 @@ class MainWindow(QWidget):
             video_filename = self.phone_3d_output_video_filename_input.text()
             save_video_black = self.phone_3d_save_video_black_background_cb.isChecked()
             video_filename_black = self.phone_3d_output_video_black_background_filename_input.text()
-            message_time = 3
 
             self.start_3d_phone_processing_signal.emit(
                 phone_ip,
-                scaling_time,
-                message_time,
                 plot_landmarks_skeleton,
                 plot_values,
                 save_keypoints,
@@ -867,6 +888,50 @@ class MainWindow(QWidget):
                 send_keypoints,
                 port
             )
+        elif source == 'Upload Video with Depth Model':
+            if self.uploaded_video_path:
+
+                send_keypoints = self.vid_3d_depth_send_keypoints_cb.isChecked()
+                port = 0
+                if send_keypoints:
+                    try:
+                        port = int(self.vid_3d_depth_port_input.text())
+                    except ValueError:
+                        QMessageBox.warning(self, "Warning", "Please enter a valid integer for the port.")
+                        return
+
+                print("Starting 3D video processing with Depth Model...")
+                self.set_ui_enabled(False)
+
+                # Get parameters from UI
+                disp_depth_map = self.vid_3d_depth_disp_depth_map_ch.isChecked()
+                use_depth_model = self.vid_3d_depth_use_depth_model_cb.isChecked()
+                plot_landmarks_skeleton = self.vid_3d_depth_plot_landmarks_cb.isChecked()
+                plot_values = self.vid_3d_depth_plot_values_cb.isChecked()
+                save_keypoints = self.vid_3d_depth_save_keypoints_cb.isChecked()
+                keypoints_filename = self.vid_3d_depth_keypoints_filename_input.text()
+                save_video = self.vid_3d_depth_save_video_cb.isChecked()
+                video_filename = self.vid_3d_depth_output_video_filename_input.text()
+                save_video_black = self.vid_3d_depth_save_video_black_background_cb.isChecked()
+                video_filename_black = self.vid_3d_depth_output_video_black_background_filename_input.text()
+                
+                self.start_3d_depth_video_processing_signal.emit(
+                    self.uploaded_video_path,
+                    use_depth_model,
+                    disp_depth_map,
+                    plot_landmarks_skeleton,
+                    plot_values,
+                    save_keypoints,
+                    keypoints_filename,
+                    save_video,
+                    video_filename,
+                    save_video_black,
+                    video_filename_black,
+                    send_keypoints,
+                    port
+                )
+            else:
+                QMessageBox.warning(self, "Warning", "Please select a video first.")
 
     def stop_processing(self):
         """Emits the signal to stop the worker's process."""
@@ -928,10 +993,6 @@ class MainWindow(QWidget):
         print(f"An error occurred: {error_message}")
         QMessageBox.critical(self, "Processing Error", error_message)
         self.set_ui_enabled(True)
-
-    def update_status_label(self, message):
-        """Slot to update the status label from the worker thread."""
-        self.status_label.setText(message)
 
     def on_image_save_landmarks_changed(self, state):
         is_checked = state == Qt.CheckState.Checked.value
@@ -1044,8 +1105,6 @@ class MainWindow(QWidget):
         
     def show_3d_video_options(self):
         self.vid_3d_browse_button.show()
-        self.vid_3d_scaling_time_label.show()
-        self.vid_3d_scaling_time_input.show()
         self.vid_3d_plot_landmarks_cb.show()
         self.vid_3d_plot_values_cb.show()
         self.vid_3d_save_keypoints_cb.show()
@@ -1057,9 +1116,22 @@ class MainWindow(QWidget):
         self.vid_3d_send_keypoints_cb.show()
         self.on_3d_video_send_keypoints_changed(self.vid_3d_send_keypoints_cb.checkState().value)
 
+    def show_3d_depth_video_options(self):
+        self.vid_3d_depth_browse_button.show()
+        self.vid_3d_depth_disp_depth_map_ch.show()
+        self.vid_3d_depth_use_depth_model_cb.show()
+        self.vid_3d_depth_plot_landmarks_cb.show()
+        self.vid_3d_depth_plot_values_cb.show()
+        self.vid_3d_depth_save_keypoints_cb.show()
+        self.on_3d_depth_video_save_keypoints_changed(self.vid_3d_depth_save_keypoints_cb.checkState().value)
+        self.vid_3d_depth_save_video_cb.show()
+        self.on_3d_depth_video_save_video_changed(self.vid_3d_depth_save_video_cb.checkState().value)
+        self.vid_3d_depth_save_video_black_background_cb.show()
+        self.on_3d_depth_video_save_video_black_background_changed(self.vid_3d_save_video_black_background_cb.checkState().value)
+        self.vid_3d_depth_send_keypoints_cb.show()
+        self.on_3d_depth_video_send_keypoints_changed(self.vid_3d_send_keypoints_cb.checkState().value)
+
     def show_3d_webcam_options(self):
-        self.cam_3d_scaling_time_label.show()
-        self.cam_3d_scaling_time_input.show()
         self.cam_3d_plot_landmarks_cb.show()
         self.cam_3d_plot_values_cb.show()
         self.cam_3d_save_keypoints_cb.show()
@@ -1081,6 +1153,7 @@ class MainWindow(QWidget):
         self.hide_3d_video_options()
         self.hide_3d_webcam_options()
         self.hide_3d_phone_options()
+        self.hide_3d_depth_video_options()
 
     def hide_image_options(self):
         self.img_browse_button.hide()
@@ -1145,8 +1218,6 @@ class MainWindow(QWidget):
 
     def hide_3d_video_options(self):
         self.vid_3d_browse_button.hide()
-        self.vid_3d_scaling_time_label.hide()
-        self.vid_3d_scaling_time_input.hide()
         self.vid_3d_plot_landmarks_cb.hide()
         self.vid_3d_plot_values_cb.hide()
         self.vid_3d_save_keypoints_cb.hide()
@@ -1161,10 +1232,27 @@ class MainWindow(QWidget):
         self.vid_3d_send_keypoints_cb.hide()
         self.vid_3d_port_label.hide()
         self.vid_3d_port_input.hide()
+        
+    def hide_3d_depth_video_options(self):
+        self.vid_3d_depth_browse_button.hide()
+        self.vid_3d_depth_disp_depth_map_ch.hide()
+        self.vid_3d_depth_use_depth_model_cb.hide()
+        self.vid_3d_depth_plot_landmarks_cb.hide()
+        self.vid_3d_depth_plot_values_cb.hide()
+        self.vid_3d_depth_save_keypoints_cb.hide()
+        self.vid_3d_depth_keypoints_filename_label.hide()
+        self.vid_3d_depth_keypoints_filename_input.hide()
+        self.vid_3d_depth_save_video_cb.hide()
+        self.vid_3d_depth_output_video_filename_label.hide()
+        self.vid_3d_depth_output_video_filename_input.hide()
+        self.vid_3d_depth_save_video_black_background_cb.hide()
+        self.vid_3d_depth_output_video_black_background_filename_label.hide()
+        self.vid_3d_depth_output_video_black_background_filename_input.hide()
+        self.vid_3d_depth_send_keypoints_cb.hide()
+        self.vid_3d_depth_port_label.hide()
+        self.vid_3d_depth_port_input.hide()
 
     def hide_3d_webcam_options(self):
-        self.cam_3d_scaling_time_label.hide()
-        self.cam_3d_scaling_time_input.hide()
         self.cam_3d_plot_landmarks_cb.hide()
         self.cam_3d_plot_values_cb.hide()
         self.cam_3d_save_keypoints_cb.hide()
@@ -1183,8 +1271,6 @@ class MainWindow(QWidget):
     def hide_3d_phone_options(self):
         self.phone_3d_ip_label.hide()
         self.phone_3d_ip_input.hide()
-        self.phone_3d_scaling_time_label.hide()
-        self.phone_3d_scaling_time_input.hide()
         self.phone_3d_plot_landmarks_cb.hide()
         self.phone_3d_plot_values_cb.hide()
         self.phone_3d_save_keypoints_cb.hide()
@@ -1252,8 +1338,7 @@ class MainWindow(QWidget):
         self.phone_output_video_filename_input.setEnabled(enabled)
         self.phone_save_processed_video_black_background_cb.setEnabled(enabled)
 
-        # 3d fixed
-        self.vid_3d_scaling_time_input.setEnabled(enabled)
+        # 3d video
         self.vid_3d_plot_landmarks_cb.setEnabled(enabled)
         self.vid_3d_plot_values_cb.setEnabled(enabled)
         self.vid_3d_save_keypoints_cb.setEnabled(enabled)
@@ -1264,8 +1349,7 @@ class MainWindow(QWidget):
         self.vid_3d_output_video_black_background_filename_input.setEnabled(enabled)
         self.vid_3d_send_keypoints_cb.setEnabled(enabled)
         self.vid_3d_port_input.setEnabled(enabled)
-        # 3d fixed webcam
-        self.cam_3d_scaling_time_input.setEnabled(enabled)
+        # 3d webcam
         self.cam_3d_plot_landmarks_cb.setEnabled(enabled)
         self.cam_3d_plot_values_cb.setEnabled(enabled)
         self.cam_3d_save_keypoints_cb.setEnabled(enabled)
@@ -1277,9 +1361,8 @@ class MainWindow(QWidget):
         self.cam_3d_send_keypoints_cb.setEnabled(enabled)
         self.cam_3d_port_input.setEnabled(enabled)
         
-        # 3d fixed phone
+        # 3d phone
         self.phone_3d_ip_input.setEnabled(enabled)
-        self.phone_3d_scaling_time_input.setEnabled(enabled)
         self.phone_3d_plot_landmarks_cb.setEnabled(enabled)
         self.phone_3d_plot_values_cb.setEnabled(enabled)
         self.phone_3d_save_keypoints_cb.setEnabled(enabled)
@@ -1290,6 +1373,20 @@ class MainWindow(QWidget):
         self.phone_3d_output_video_black_background_filename_input.setEnabled(enabled)
         self.phone_3d_send_keypoints_cb.setEnabled(enabled)
         self.phone_3d_port_input.setEnabled(enabled)
+        
+        # 3d video with Depth Model
+        self.vid_3d_depth_browse_button.setEnabled(enabled)
+        self.vid_3d_depth_use_depth_model_cb.setEnabled(enabled)
+        self.vid_3d_depth_plot_landmarks_cb.setEnabled(enabled)
+        self.vid_3d_depth_plot_values_cb.setEnabled(enabled)
+        self.vid_3d_depth_save_keypoints_cb.setEnabled(enabled)
+        self.vid_3d_depth_keypoints_filename_input.setEnabled(enabled)
+        self.vid_3d_depth_save_video_cb.setEnabled(enabled)
+        self.vid_3d_depth_output_video_filename_input.setEnabled(enabled)
+        self.vid_3d_depth_save_video_black_background_cb.setEnabled(enabled)
+        self.vid_3d_depth_output_video_black_background_filename_input.setEnabled(enabled)
+        self.vid_3d_depth_send_keypoints_cb.setEnabled(enabled)
+        self.vid_3d_depth_port_input.setEnabled(enabled)
         
         # --- Change button appearance based on state ---
         if enabled:
@@ -1320,21 +1417,41 @@ class MainWindow(QWidget):
         is_checked = state == Qt.CheckState.Checked.value
         self.vid_3d_keypoints_filename_label.setVisible(is_checked)
         self.vid_3d_keypoints_filename_input.setVisible(is_checked)
-        
+    
+    def on_3d_depth_video_save_keypoints_changed(self, state):
+        is_checked = state == Qt.CheckState.Checked.value
+        self.vid_3d_depth_keypoints_filename_label.setVisible(is_checked)
+        self.vid_3d_depth_keypoints_filename_input.setVisible(is_checked)
+    
     def on_3d_video_save_video_changed(self, state):
         is_checked = state == Qt.CheckState.Checked.value
         self.vid_3d_output_video_filename_label.setVisible(is_checked)
         self.vid_3d_output_video_filename_input.setVisible(is_checked)
+        
+    def on_3d_depth_video_save_video_changed(self, state):
+        is_checked = state == Qt.CheckState.Checked.value
+        self.vid_3d_depth_output_video_filename_label.setVisible(is_checked)
+        self.vid_3d_depth_output_video_filename_input.setVisible(is_checked)
 
     def on_3d_video_save_video_black_background_changed(self, state):
         is_checked = state == Qt.CheckState.Checked.value
         self.vid_3d_output_video_black_background_filename_label.setVisible(is_checked)
         self.vid_3d_output_video_black_background_filename_input.setVisible(is_checked)
+    
+    def on_3d_depth_video_save_video_black_background_changed(self, state):
+        is_checked = state == Qt.CheckState.Checked.value
+        self.vid_3d_depth_output_video_black_background_filename_label.setVisible(is_checked)
+        self.vid_3d_depth_output_video_black_background_filename_input.setVisible(is_checked)
 
     def on_3d_video_send_keypoints_changed(self, state):
         is_checked = state == Qt.CheckState.Checked.value
         self.vid_3d_port_label.setVisible(is_checked)
         self.vid_3d_port_input.setVisible(is_checked)
+    
+    def on_3d_depth_video_send_keypoints_changed(self, state):
+        is_checked = state == Qt.CheckState.Checked.value
+        self.vid_3d_depth_port_label.setVisible(is_checked)
+        self.vid_3d_depth_port_input.setVisible(is_checked)
 
     def on_3d_cam_save_keypoints_changed(self, state):
         is_checked = state == Qt.CheckState.Checked.value
@@ -1379,8 +1496,8 @@ class MainWindow(QWidget):
     def show_3d_phone_options(self):
         self.phone_3d_ip_label.show()
         self.phone_3d_ip_input.show()
-        self.phone_3d_scaling_time_label.show()
-        self.phone_3d_scaling_time_input.show()
+        # self.phone_3d_scaling_time_label.show()
+        # self.phone_3d_scaling_time_input.show()
         self.phone_3d_plot_landmarks_cb.show()
         self.phone_3d_plot_values_cb.show()
         self.phone_3d_save_keypoints_cb.show()
@@ -1391,7 +1508,6 @@ class MainWindow(QWidget):
         self.on_3d_phone_save_video_black_background_changed(self.phone_3d_save_video_black_background_cb.checkState().value)
         self.phone_3d_send_keypoints_cb.show()
         self.on_3d_phone_send_keypoints_changed(self.phone_3d_send_keypoints_cb.checkState().value)
-
 
     # --- For Styling the APP ---
     def apply_theme(self, theme='light'):
@@ -1414,19 +1530,6 @@ class MainWindow(QWidget):
     def set_dark_mode(self):
         """Switch to dark theme"""
         self.apply_theme('dark')
-
-    def update_status_label_styled(self, message, status_type='info'):
-        """Update status label with appropriate styling based on status type"""
-        self.status_label.setText(message)
-        
-        if status_type == 'processing':
-            self.status_label.setStyleSheet(UIStyles.COMPONENT_STYLES['status_processing'])
-        elif status_type == 'success':
-            self.status_label.setStyleSheet(UIStyles.COMPONENT_STYLES['status_success'])
-        elif status_type == 'error':
-            self.status_label.setStyleSheet(UIStyles.COMPONENT_STYLES['status_error'])
-        else:  # info or default
-            self.status_label.setStyleSheet("")  # Use default theme styling
 
     # --- For Switching Models ---
     def set_light_model(self):

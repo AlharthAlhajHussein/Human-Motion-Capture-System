@@ -65,7 +65,7 @@ def extract_2D_landmarks(results):
     return landmark_2D_list
 
 # ===== Extract 3D landmarks from MediaPipe results for case 3D (fixed) keypoints =====
-def extract_3D_landmarks_fixed(results):
+def extract_3D_landmarks(results):
     """Extract 3D landmarks from MediaPipe results.
 
     Args:
@@ -138,6 +138,13 @@ def calculate_extra_landmarks(landmark_list):
     right_ear = landmark_list[8]
     
     
+    # Calculate Head coordinates
+    head = {
+        'x': (nose['x'] + left_ear['x'] + right_ear['x']) / 3.0,
+        'y': (nose['y'] + left_ear['y'] + right_ear['y']) / 3.0,
+        'name': 'head'
+    }
+    
     # Calculate Spine coordinates
     spine = {
         'x': (left_hip['x'] + right_hip['x'] + right_shoulder['x'] + left_shoulder['x']) / 4.0,
@@ -147,8 +154,8 @@ def calculate_extra_landmarks(landmark_list):
     
     # Calculate Hip coordinates
     hip = {
-        'x': (left_hip['x'] + right_hip['x'] + spine['x']) / 3.0,
-        'y': (left_hip['y'] + right_hip['y'] + spine['y']) / 3.0,
+        'x': (left_hip['x'] + right_hip['x']) / 2.0,
+        'y': (left_hip['y'] + right_hip['y']) / 2.0,
         'name': 'hip'
     }
 
@@ -157,13 +164,6 @@ def calculate_extra_landmarks(landmark_list):
         'x': (left_mouth['x'] + right_mouth['x'] + right_shoulder['x'] + left_shoulder['x']) / 4.0,
         'y': (left_mouth['y'] + right_mouth['y'] + right_shoulder['y'] + left_shoulder['y']) / 4.0,
         'name': 'neck'
-    }
-
-    # Calculate Head coordinates
-    head = {
-        'x': (nose['x'] + left_ear['x'] + right_ear['x']) / 3.0,
-        'y': (nose['y'] + left_ear['y'] + right_ear['y']) / 3.0,
-        'name': 'head'
     }
     
     # Check if the z-coordinates are available in the landmark list
@@ -263,15 +263,15 @@ def project_special_values(image, landmark_dicts, scaled_landmarks_dicts=None):
     
     Args:
         image (cv2.Mat): the original image
-        landmark_dicts (dict): the dictionary of landmarks for the case of 2D or 3D (movable) keypoints
-        scaled_landmarks_dicts (dict): the dictionary of scaled landmarks for the case of 3D (fixed) keypoints
+        landmark_dicts (dict): the dictionary of landmarks for the case of 2D keypoints
+        scaled_landmarks_dicts (dict): the dictionary of scaled landmarks for the case of 3D keypoints
     """
     
     # Define the names of the keypoints to draw the values of
     names_Y = ['head', 'left_ankle', 'right_ankle', 'hip']  # draw the Y values of these keypoints
     names_X = ['left_wrist', 'right_wrist', 'hip']          # draw the X values of these keypoints
     
-    # For the case of 2D and 3D (movable) keypoints
+    # For the case of 2D keypoints
     if scaled_landmarks_dicts is None:
         for name, landmark in landmark_dicts.items():
             if name in names_Y:
@@ -286,7 +286,7 @@ def project_special_values(image, landmark_dicts, scaled_landmarks_dicts=None):
                 else:
                     cv2.putText(image, f"x={x}", (x, y+3), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
     else:
-        # For the case of 3D (fixed) keypoints, we need to store the 2D positions of the keypoints
+        # For the case of 3D keypoints, we need to store the 2D positions of the keypoints
         store_2d_positions = {}
         
         for name, landmark in landmark_dicts.items():
@@ -298,17 +298,19 @@ def project_special_values(image, landmark_dicts, scaled_landmarks_dicts=None):
         for name, landmark in scaled_landmarks_dicts.items():
             if name in names_Y:
                 y_value = round(landmark['y'], 2)
+                z_value = round(landmark['z'], 2)
                 x, y = store_2d_positions[name]
-                cv2.putText(image, f"y={y_value}", (x+6, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                cv2.putText(image, f"y={y_value},z={z_value}", (x+6, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
             if name in names_X:
                 x_value = round(landmark['x'], 2)
+                z_value = round(landmark['z'], 2)
                 x, y = store_2d_positions[name]
                 if name == 'hip':
-                    cv2.putText(image, f"x={x_value}", (x+6, y-16), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                    cv2.putText(image, f"x={x_value},z={z_value}", (x+6, y-16), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                 else:
-                    cv2.putText(image, f"x={x_value}", (x, y+6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                    cv2.putText(image, f"x={x_value},z={z_value}", (x, y+6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-# ===== Calculate scaling parameters for case 3D (fixed) keypoints =====
+# ===== Calculate scaling parameters for case 3D keypoints =====
 def calculate_scaling_params(landmark_dicts):
     """Calculate the scaling parameters for the landmarks for the case of 3D (fixed) keypoints.
 
@@ -336,7 +338,7 @@ def calculate_scaling_params(landmark_dicts):
 
     return (w1, w2, lowest_point)
 
-# ===== Scale landmarks for case 3D (fixed) keypoints =====
+# ===== Scale landmarks for case 3D keypoints =====
 def scale_landmarks(landmark_dicts, w1, w2, lowest_point):
     """Scale the landmarks to the original character size (2.9 units width and 3.1 units height) for the case of 3D (fixed) keypoints.
 
@@ -352,7 +354,7 @@ def scale_landmarks(landmark_dicts, w1, w2, lowest_point):
         landmark['y'] = round((lowest_point - landmark['y']) * w2, 3)
         landmark['z'] = round(landmark['z'] * 2.5, 3)
     
-# ===== Adjust landmarks for case 3D (movable) keypoints =====
+# ===== Adjust landmarks for case 3D keypoints =====
 def adjust_landmarks(image,landmark_dicts):
     """Adjust the landmarks to fit with the original character size for the case of 3D (movable) keypoints.
     
@@ -482,7 +484,79 @@ def load_image_with_orientation(image_path):
         print(f"Error during orientation correction: {e}. Falling back to standard image loading.")
         return cv2.imread(image_path)
     
-    
-    
+# ===== Get Depth value for the hip keypoint =====    
+def get_depth_for_hip_keypoint(landmarks_3d, depth_map, frame):
+    """ extract the depth value from the depth map for hip keypoint
 
+    Args:
+        landmarks_3d (dict): contains all the keypoints that we send and save.
+        depth_map (numpy.ndarray): The depth map from the model.
+        
+    Return: 
+        hip_z (float): the depth value for the hip keypoint.
+    """
+    landmark = landmarks_3d['hip']
+    hip_x_norm = landmark['x']
+    hip_y_norm = landmark['y']
+    
+    # Get the dimensions of the depth map
+    h, w, _ = frame.shape
+    
+    # Convert normalized coordinates (0.0 to 1.0) to pixel coordinates (0 to width/height)
+    # The x-coordinate corresponds to the column index (width) and y to the row index (height)
+    # It's important to use the correct order (y, x) for NumPy/PyTorch indexing
+    hip_x_pixel = int(hip_x_norm * w)
+    hip_y_pixel = int(hip_y_norm * h)
+
+    # Make sure the pixel coordinates are within the bounds of the image
+    hip_x_pixel = np.clip(hip_x_pixel, 0, w - 1)
+    hip_y_pixel = np.clip(hip_y_pixel, 0, h - 1)
+    
+    # Extract the depth value using the integer pixel coordinates
+    hip_z = round((depth_map[hip_y_pixel, hip_x_pixel]) * (-1), 3)
+    
+    return hip_z
+
+# ===== Shifting all keypoints with the z value =====
+def shifting_keypoints_with_z_value(landmark_3d, z_value):
+    """shifting the all keypoints based on the z of the hip value
+
+    Args:
+        landmark_3d (dict): 3D landmarks
+        z_value (float): Z value from the depth estimation model
+    """
+    for name, landmark in landmark_3d.items():
+        landmark['z'] = round(landmark['z'] + z_value, 3)
+        
+def get_norm_x_for_hip(results):
+    """Extract 1D landmark for hip keypiont from MediaPipe results.
+    
+    Args:
+        results (MediaPipe results): the results from the MediaPipe model
+    
+    Returns:
+        normalized_hip_x (float): 1D landmark value for the hip keypoint
+    """
+    
+    left_up_x = results.pose_landmarks.landmark[23].x
+    reight_up_x = results.pose_landmarks.landmark[24].x
+    
+    normalized_hip_x = (left_up_x + reight_up_x) / 2
+
+    return normalized_hip_x    
+    
+def shifting_keypoints_with_x_value(norm_hip_x, frame, landmarks_3d):
+    """Shifting all keypoints based on the x of hip value
+
+    Args:
+        norm_hip_x (float): normalized hip x keypoint
+        frame (image): the frame that we show on the app
+        landmarks_3d (dict): 3d landmarks
+    """
+    h, w, _ = frame.shape
+    center = ((w/1.7) / 2)
+    denorm_hip_x = ((norm_hip_x * (w/1.7)) - center) / 100
+    
+    for name, landmark in landmarks_3d.items():
+        landmark['x'] = round(landmark['x'] + denorm_hip_x, 3)
 
