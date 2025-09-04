@@ -60,8 +60,8 @@ class Worker(QObject):
         
         # Load model weights
         if checkpoint_path is None:
-            # checkpoint_path = f'logic/checkpoints/depth_anything_v2_{encoder}.pth'
-            checkpoint_path = f'logic/checkpoints/depth_anything_v2_metric_hypersim_vits.pth'
+            checkpoint_path = f'logic/checkpoints/depth_anything_v2_{encoder}.pth'
+            # checkpoint_path = f'logic/checkpoints/depth_anything_v2_metric_hypersim_vits.pth'
         
         try:
             state_dict = torch.load(checkpoint_path, map_location="cpu")
@@ -77,7 +77,8 @@ class Worker(QObject):
         
         # Initialize colormap for depth visualization (Spectral_r gives nice colored depth maps)
         self.cmap = matplotlib.colormaps.get_cmap('Spectral_r')
-                
+        
+        
     def switch_model(self, model_comp):
         """Switches the model complexity
         Args:
@@ -647,6 +648,7 @@ class Worker(QObject):
         writer = None
         writer_black = None
         server = None
+        is_first = True
         try:
             if send_keypoints:
                 server = KeypointServer(port)
@@ -664,7 +666,8 @@ class Worker(QObject):
                 writer_black = self.init_writer(cap, video_filename_black, frame)
             
             all_video_keypoints = []
-            store_last_2_frames = []
+            store_last_10_frames = []
+            colored_map = None
             
             while self.is_running:
                 ret, frame = cap.read()
@@ -688,14 +691,20 @@ class Worker(QObject):
                             depth_map = self.model.infer_image(display_frame)
                             
                         # Get the Z value from the depth map and store it in a list
-                        hip_z = get_depth_for_hip_keypoint(required_landmarks_3d, depth_map, display_frame)
-                        store_last_2_frames.append(hip_z)
+                        hip_z = float(get_depth_for_hip_keypoint(required_landmarks_3d, depth_map, display_frame))
+                        store_last_10_frames.append(hip_z)
+                        
+                        if is_first:
+                            first_z = hip_z
+                            is_first = False
                         
                         # check if you have more then 5 fram pass to start shifting the keypoints
-                        if len(store_last_2_frames) > 2:
-                            length = len(store_last_2_frames)
-                            hip_z_avg = float(round(np.mean(store_last_2_frames[length-2:]), 3))
-                            shifting_keypoints_with_z_value(required_landmarks_3d, hip_z_avg)
+                        if len(store_last_10_frames) > 10:
+                            length = len(store_last_10_frames)
+                            hip_z_avg = float(round(np.mean(store_last_10_frames[length-10:]), 3))
+                            shifting_keypoints_with_z_value(required_landmarks_3d, hip_z_avg, first_z)
+                        else:
+                            shifting_keypoints_with_z_value(required_landmarks_3d, hip_z, first_z)
                         
                         if display_depth_map:
                             colored_map = self.process_depth_map(depth_map)

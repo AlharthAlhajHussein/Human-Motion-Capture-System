@@ -1376,6 +1376,7 @@ class MainWindow(QWidget):
         
         # 3d video with Depth Model
         self.vid_3d_depth_browse_button.setEnabled(enabled)
+        self.vid_3d_depth_disp_depth_map_ch.setEnabled(enabled)
         self.vid_3d_depth_use_depth_model_cb.setEnabled(enabled)
         self.vid_3d_depth_plot_landmarks_cb.setEnabled(enabled)
         self.vid_3d_depth_plot_values_cb.setEnabled(enabled)

@@ -513,20 +513,25 @@ def get_depth_for_hip_keypoint(landmarks_3d, depth_map, frame):
     hip_y_pixel = np.clip(hip_y_pixel, 0, h - 1)
     
     # Extract the depth value using the integer pixel coordinates
-    hip_z = round((depth_map[hip_y_pixel, hip_x_pixel]) * (-1), 3)
+    hip_z = round((depth_map[hip_y_pixel, hip_x_pixel]), 3)
+    
     
     return hip_z
 
 # ===== Shifting all keypoints with the z value =====
-def shifting_keypoints_with_z_value(landmark_3d, z_value):
+def shifting_keypoints_with_z_value(landmark_3d, z_value, first_z):
     """shifting the all keypoints based on the z of the hip value
 
     Args:
         landmark_3d (dict): 3D landmarks
         z_value (float): Z value from the depth estimation model
     """
+    
+    z_value = (z_value - first_z) * 7
+    
     for name, landmark in landmark_3d.items():
         landmark['z'] = round(landmark['z'] + z_value, 3)
+        
         
 def get_norm_x_for_hip(results):
     """Extract 1D landmark for hip keypiont from MediaPipe results.
@@ -554,8 +559,8 @@ def shifting_keypoints_with_x_value(norm_hip_x, frame, landmarks_3d):
         landmarks_3d (dict): 3d landmarks
     """
     h, w, _ = frame.shape
-    center = ((w/1.7) / 2)
-    denorm_hip_x = ((norm_hip_x * (w/1.7)) - center) / 100
+    center = ((w/1.2) / 2)
+    denorm_hip_x = ((norm_hip_x * (w/1.2)) - center) / 100
     
     for name, landmark in landmarks_3d.items():
         landmark['x'] = round(landmark['x'] + denorm_hip_x, 3)
