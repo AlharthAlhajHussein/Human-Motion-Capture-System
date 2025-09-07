@@ -61,7 +61,6 @@ class Worker(QObject):
         # Load model weights
         if checkpoint_path is None:
             checkpoint_path = f'logic/checkpoints/depth_anything_v2_{encoder}.pth'
-            # checkpoint_path = f'logic/checkpoints/depth_anything_v2_metric_hypersim_vits.pth'
         
         try:
             state_dict = torch.load(checkpoint_path, map_location="cpu")
@@ -78,14 +77,84 @@ class Worker(QObject):
         # Initialize colormap for depth visualization (Spectral_r gives nice colored depth maps)
         self.cmap = matplotlib.colormaps.get_cmap('Spectral_r')
         
-        
-    def switch_model(self, model_comp):
+    def switch_mediapipe_model(self, model_comp):
         """Switches the model complexity
         Args:
             model_complixity (int): The complexity of the model 1 light or 2 heavy
         """
         self.media_processor = MediaProcessor(model_complexity=model_comp)
     
+    def switch_depth_anything_model(self, model_size):
+        """
+        Switches the depth model size and reinitializes the model on GPU
+        
+        Args:
+            model_size (str): The size of the depth model ('vits', 'vitb', 'vitl', 'vitg')
+        """
+        
+        self.stop()
+        
+        try:
+            print(f"Switching Depth Anything model to: {model_size}")
+            
+            # Validate model size
+            if model_size not in self.model_configs:
+                raise ValueError(f"Invalid model size '{model_size}'. Valid options: {list(self.model_configs.keys())}")
+            
+            # Clear current model from GPU memory to prevent memory issues
+            if hasattr(self, 'model') and self.model is not None:
+                del self.model
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    print("Cleared GPU cache")
+            
+            # Update encoder
+            self.encoder = model_size
+            
+            # Initialize new model with the selected configuration
+            self.model = DepthAnythingV2(**self.model_configs[model_size])
+            
+            # Load model weights for the new size
+            checkpoint_path = f'logic/checkpoints/depth_anything_v2_{model_size}.pth'
+            
+            try:
+                print(f"Loading checkpoint: {checkpoint_path}")
+                state_dict = torch.load(checkpoint_path, map_location="cpu")
+                self.model.load_state_dict(state_dict)
+                print(f"Model weights loaded successfully from: {checkpoint_path}")
+            except FileNotFoundError:
+                error_msg = f"Error: Checkpoint file not found at {checkpoint_path}"
+                print(error_msg)
+                print(f"Please make sure you have downloaded the {model_size} model weights.")
+                # Emit error signal if available
+                if hasattr(self, 'error'):
+                    self.error.emit(f"Checkpoint not found: {checkpoint_path}")
+                return False
+            
+            # Move model to device (GPU/CPU) and set to evaluation mode
+            self.model = self.model.to(self.device).eval()
+            
+            print(f"Successfully switched to {model_size} model on device: {self.device}")
+            
+            # Print model info
+            model_info = {
+                'vits': 'Small Model (Fastest, Lower Accuracy)',
+                'vitb': 'Base Model (Balanced Speed/Accuracy)', 
+                'vitl': 'Large Model (Slower, Higher Accuracy)',
+                'vitg': 'Giant Model (Slowest, Highest Accuracy)'
+            }
+            
+            print(f"Active model: {model_info.get(model_size, model_size)}")
+            
+            return True
+            
+        except Exception as e:
+            error_msg = f"Failed to switch depth model: {str(e)}"
+            print(error_msg)
+            if hasattr(self, 'error'):
+                self.error.emit(error_msg)
+            return False
+        
     def process_image(self, image_path, plot_landmarks, plot_skeleton, save_landmarks, landmark_filename, save_image, output_size_str, processed_image_filename, save_image_black, processed_image_black_background_filename):
         """A slot that processes the image and emits a signal when done."""
         try:
@@ -641,6 +710,151 @@ class Worker(QObject):
                 server.stop()
             self.is_running = False
 
+    def process_3d_phone_with_depth_model(self, ip_address, use_depth_model, display_depth_map, plot_landmarks_skeleton, plot_values, save_keypoints_flag, keypoints_filename, save_video, video_filename, save_video_black, video_filename_black, send_keypoints, port):
+        self.is_running = True
+        writer = None
+        writer_black = None
+        server = None
+        is_first = True
+        
+        try:
+            if send_keypoints:
+                server = KeypointServer(port)
+                server.start()
+            
+            url = f"http://{ip_address}:8080/shot.jpg"
+            print(f"Attempting to connect to phone camera at: {url}")
+            
+            # Try to get one frame to initialize writers
+            first_frame = None
+            try:
+                img_resp = requests.get(url, timeout=5)
+                img_resp.raise_for_status()
+                img_arr = np.frombuffer(img_resp.content, dtype=np.uint8)
+                first_frame = cv2.imdecode(img_arr, -1)
+                if first_frame is None:
+                    raise RuntimeError("Failed to decode frame for writer initialization.")
+            except requests.exceptions.RequestException as e:
+                raise RuntimeError(f"Could not connect to phone camera to initialize. Check IP. Error: {e}")
+
+            # --- Main Processing ---
+            if save_video:
+                writer = self.init_writer_phone(video_filename, 7, first_frame)
+            if save_video_black:
+                writer_black = self.init_writer_phone(video_filename_black, 7, first_frame)
+            
+            all_video_keypoints = []
+            store_last_10_frames = []
+            colored_map = None
+            
+            while self.is_running:
+                try:
+                    img_resp = requests.get(url, timeout=1.5)
+                    img_arr = np.frombuffer(img_resp.content, dtype=np.uint8)
+                    frame = cv2.imdecode(img_arr, -1)
+                    if frame is None:
+                        print("Warning: Skipped a bad frame from phone camera.")
+                        continue
+                except requests.exceptions.RequestException:
+                    print(f"Warning: Failed to get a frame from phone camera. Will retry.")
+                    QCoreApplication.processEvents()
+                    continue
+
+                display_frame = frame.copy()
+                black_background_frame = np.zeros_like(frame) if save_video_black else None
+
+                results = self.media_processor.video_pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                
+                if results.pose_world_landmarks:
+                    landmarks_3d = extract_3D_landmarks(results)
+                    extra_landmarks_3d = calculate_extra_landmarks(landmarks_3d)
+                    required_landmarks_3d = get_required_landmark(landmarks_3d, extra_landmarks_3d)
+
+                    if use_depth_model:
+                        # Use the Depth model and get the depth value for the hip keypoint
+                        with torch.no_grad():  # Disable gradient computation for faster inference
+                            depth_map = self.model.infer_image(display_frame)
+                            
+                        # Get the Z value from the depth map and store it in a list
+                        hip_z = float(get_depth_for_hip_keypoint(required_landmarks_3d, depth_map, display_frame))
+                        store_last_10_frames.append(hip_z)
+                        
+                        if is_first:
+                            first_z = hip_z
+                            is_first = False
+                        
+                        # check if you have more then 5 fram pass to start shifting the keypoints
+                        if len(store_last_10_frames) > 10:
+                            length = len(store_last_10_frames)
+                            hip_z_avg = float(round(np.mean(store_last_10_frames[length-10:]), 3))
+                            shifting_keypoints_with_z_value(required_landmarks_3d, hip_z_avg, first_z)
+                        else:
+                            shifting_keypoints_with_z_value(required_landmarks_3d, hip_z, first_z)
+                        
+                        if display_depth_map:
+                            colored_map = self.process_depth_map(depth_map)
+                        
+                    norm_hip_x = get_norm_x_for_hip(results)
+                    shifting_keypoints_with_x_value(norm_hip_x, display_frame, required_landmarks_3d)
+                    
+
+                    if save_keypoints_flag:
+                        all_video_keypoints.append(required_landmarks_3d)
+                    
+                    if server:
+                        server.broadcast(required_landmarks_3d)
+                    
+                    if plot_landmarks_skeleton or plot_values:
+                        landmarks_2d = extract_2D_landmarks(results)
+                        extra_landmarks_2d = calculate_extra_landmarks(landmarks_2d)
+                        required_landmarks_2d = get_required_landmark(landmarks_2d, extra_landmarks_2d)
+                        denormalize_landmarks(display_frame, required_landmarks_2d)
+
+                        if plot_landmarks_skeleton:
+                            project_landmarks(display_frame, required_landmarks_2d)
+                            project_skeleton(display_frame, required_landmarks_2d)
+                            if save_video_black and black_background_frame is not None:
+                                project_landmarks(black_background_frame, required_landmarks_2d)
+                                project_skeleton(black_background_frame, required_landmarks_2d)
+                        
+                        if plot_values:
+                            project_special_values(display_frame, required_landmarks_2d, required_landmarks_3d)
+                            if save_video_black and black_background_frame is not None:
+                                project_special_values(black_background_frame, required_landmarks_2d, required_landmarks_3d)
+                
+                if display_depth_map and colored_map is not None:
+                    self.new_frame_ready.emit(colored_map)
+                elif save_video:
+                    self.new_frame_ready.emit(display_frame)
+                elif save_video_black and black_background_frame is not None:
+                    self.new_frame_ready.emit(black_background_frame)
+                else:
+                    self.new_frame_ready.emit(display_frame)
+                
+                if writer:
+                    writer.write(display_frame)
+                if writer_black and black_background_frame is not None:
+                    writer_black.write(black_background_frame)
+
+                QCoreApplication.processEvents()
+            
+            if save_keypoints_flag and keypoints_filename:
+                save_keypoints(all_video_keypoints, keypoints_filename)
+            
+            completion_message = "3D Phone processing complete." if self.is_running else "Processing stopped by user."
+            self.video_finished.emit(completion_message)
+
+        except Exception as e:
+            self.error.emit(str(e))
+        finally:
+            if writer:
+                writer.release()
+            if writer_black:
+                writer_black.release()
+            if server:
+                server.stop()
+            self.is_running = False
+
     def process_3d_video_with_depth_model(self, video_path, use_depth_model, display_depth_map, plot_landmarks_skeleton, plot_values, save_keypoints_flag, keypoints_filename, save_video, video_filename, save_video_black, video_filename_black, send_keypoints, port):
         
         self.is_running = True
@@ -708,7 +922,6 @@ class Worker(QObject):
                         
                         if display_depth_map:
                             colored_map = self.process_depth_map(depth_map)
-                        
                         
                     norm_hip_x = get_norm_x_for_hip(results)
                     shifting_keypoints_with_x_value(norm_hip_x, display_frame, required_landmarks_3d)

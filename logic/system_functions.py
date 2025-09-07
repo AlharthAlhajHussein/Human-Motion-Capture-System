@@ -527,7 +527,7 @@ def shifting_keypoints_with_z_value(landmark_3d, z_value, first_z):
         z_value (float): Z value from the depth estimation model
     """
     
-    z_value = (z_value - first_z) * 7
+    z_value = (z_value - first_z) * 8
     
     for name, landmark in landmark_3d.items():
         landmark['z'] = round(landmark['z'] + z_value, 3)
