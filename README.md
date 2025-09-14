@@ -12,11 +12,13 @@ An advanced desktop application for real-time 2D and 3D human pose estimation, b
 
 Watch this short video to see the system's key features in action!
 
-<a href="URL_TO_YOUR_DEMO_VIDEO" target="_blank">
+[![Watch the demo](https://github.com/AlharthAlhajHussein/Human-Motion-Capture-System/blob/main/images/video_icon.png)](https://youtu.be/nQ9ILd5VCtU)
+
+Click the image to watch a demo video of the application in action.
+
+<a href="https://youtu.be/nQ9ILd5VCtU" target="_blank">
   <img src="https://i.imgur.com/your_thumbnail_image.jpg" alt="Project Demo Video" width="600" />
 </a>
-
-*(Note: Please replace the link and thumbnail URL with your own demo video.)*
 
 <br>
 
