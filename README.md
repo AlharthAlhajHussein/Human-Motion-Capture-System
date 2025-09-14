@@ -140,7 +140,7 @@ The main window will appear, and from there you can select the processing type a
 
 I would like to thank everyone who contributed to the development of this project:
 
-- [Zakaria Dliwati](https://github.com/AlharthAlhajHussein) 
+- [Zakaria Dliwati](https://github.com/Zakaria-Dliwati) 
 
 - [Muhammad Ali](https://github.com/AlharthAlhajHussein)
 
